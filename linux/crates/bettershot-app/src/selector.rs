@@ -46,6 +46,10 @@ struct Shared {
 
 type SharedRef = Rc<RefCell<Shared>>;
 
+pub const CAPTURE_HINT: &str = "Drag to select an area · Enter to capture · Esc to cancel";
+pub const SCROLL_HINT: &str = "Drag over the area to scroll · Enter to start · Esc to cancel";
+pub const TEXT_HINT: &str = "Drag over text to copy it · Esc to cancel";
+
 const DIM: f64 = 0.45;
 const HANDLE_RADIUS: f64 = 4.5;
 
@@ -56,6 +60,7 @@ pub async fn select(
     layout: &Layout,
     preselect: Option<Rect>,
     capture_on_release: bool,
+    hint: &str,
 ) -> Option<Rect> {
     let (sender, receiver) = async_channel::bounded(1);
     let scale = (
@@ -72,7 +77,7 @@ pub async fn select(
     }));
 
     for (index, (monitor, rect)) in layout.monitors.iter().enumerate() {
-        let screen = build_screen(&shared, index, monitor, *rect, &frame);
+        let screen = build_screen(&shared, index, monitor, *rect, &frame, hint);
         shared.borrow_mut().screens.push(screen);
     }
     // Open with the previous area selected, so Return captures it again.
@@ -94,7 +99,14 @@ pub async fn select(
     receiver.recv().await.ok().flatten()
 }
 
-fn build_screen(shared: &SharedRef, index: usize, monitor: &gdk::Monitor, rect: Rect, frame: &FrozenFrame) -> Screen {
+fn build_screen(
+    shared: &SharedRef,
+    index: usize,
+    monitor: &gdk::Monitor,
+    rect: Rect,
+    frame: &FrozenFrame,
+    hint: &str,
+) -> Screen {
     let picture = gtk::Picture::new();
     picture.set_content_fit(gtk::ContentFit::Fill);
     picture.set_can_shrink(true);
@@ -130,7 +142,7 @@ fn build_screen(shared: &SharedRef, index: usize, monitor: &gdk::Monitor, rect: 
         .visible(false)
         .build();
     let hint = gtk::Label::builder()
-        .label("Drag to select an area · Enter to capture · Esc to cancel")
+        .label(hint)
         .css_classes(["selector-hint"])
         .halign(gtk::Align::Center)
         .valign(gtk::Align::Center)

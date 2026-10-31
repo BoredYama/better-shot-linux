@@ -4,6 +4,7 @@
 mod canvas;
 mod inspector;
 pub mod model;
+mod smart_redaction;
 mod window;
 
 pub use window::{open, open_file_dialog};

@@ -20,6 +20,7 @@ bettershot-render.workspace = true
 chrono.workspace = true
 gtk.workspace = true
 image.workspace = true
+pangocairo.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 

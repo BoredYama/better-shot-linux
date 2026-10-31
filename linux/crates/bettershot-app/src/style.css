@@ -63,3 +63,11 @@
 .editor-inspector .alignment-cell:checked {
   color: @accent_color;
 }
+
+window.pinned-screenshot {
+  background: none;
+}
+
+.pinned-image {
+  border-radius: 8px;
+}

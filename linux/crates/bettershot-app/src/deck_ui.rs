@@ -110,7 +110,7 @@ fn slot_alignment(slot: OverlayToolSlot) -> (gtk::Align, gtk::Align) {
 
 /// Tools that work in this phase.
 fn is_available(tool: OverlayTool) -> bool {
-    matches!(tool, OverlayTool::Copy | OverlayTool::Save | OverlayTool::Dismiss | OverlayTool::Edit)
+    matches!(tool, OverlayTool::Copy | OverlayTool::Save | OverlayTool::Dismiss | OverlayTool::Edit | OverlayTool::Pin)
 }
 
 impl Card {
@@ -192,7 +192,8 @@ impl Card {
                     OverlayTool::Save => card.save(),
                     OverlayTool::Dismiss => card.dismiss(),
                     OverlayTool::Edit => card.edit(),
-                    OverlayTool::Pin | OverlayTool::Share => {}
+                    OverlayTool::Pin => card.pin(),
+                    OverlayTool::Share => {}
                 }
             });
             overlay.add_overlay(&button);
@@ -295,6 +296,26 @@ impl Card {
     pub fn edit(&self) {
         self.cancel_timer();
         crate::editor::open(&App::get(), &self.display());
+    }
+
+    /// Keeps the capture in the library, pins it, and removes the card.
+    pub fn pin(&self) {
+        self.cancel_timer();
+        let app = App::get();
+        let display = self.display();
+        let retained = {
+            let mut state = app.state_mut();
+            let state = &mut *state;
+            state.deck.retain(&display, &mut state.history)
+        };
+        if app.state().deck.is_staged(&retained) {
+            self.show_save_failure();
+            return;
+        }
+        match crate::pin::open(&app, &retained) {
+            Ok(_) => self.dismiss(),
+            Err(error) => self.set_status(&format!("Couldn’t pin. {error}"), true),
+        }
     }
 
     pub fn copy(&self) {

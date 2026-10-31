@@ -6,7 +6,7 @@
 //! screenshot. Copy and Export never change that export.
 
 use super::model::EditorModel;
-use super::{canvas, inspector, Editor};
+use super::{canvas, inspector, smart_redaction, Editor};
 use crate::app::App;
 use crate::{clipboard, deck_ui};
 use adw::prelude::*;
@@ -36,6 +36,9 @@ pub struct Widgets {
     save: gtk::Button,
     tools: Vec<(Tool, gtk::ToggleButton)>,
     crop: gtk::ToggleButton,
+    /// Rotate and flip; disabled while smart redaction scans.
+    transforms: Vec<gtk::Button>,
+    pub smart_redaction: smart_redaction::Controls,
     crop_bar: gtk::Revealer,
     zoom: gtk::Button,
     toasts: adw::ToastOverlay,
@@ -198,11 +201,14 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
         toolbar.append(&button);
         tools.push((tool, button));
     }
+    let smart = smart_redaction::build(editor);
+    toolbar.append(&smart.button);
     toolbar.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     let crop = gtk::ToggleButton::builder().icon_name("bettershot-crop-symbolic").css_classes(["flat"]).build();
     crop.set_tooltip_text(Some(&with_shortcut(app, "Crop", Action::ImageCrop)));
     crop.update_property(&[gtk::accessible::Property::Label("Crop")]);
     toolbar.append(&crop);
+    let mut transforms = Vec::new();
     for (transform, icon) in [
         (ImageTransform::RotateLeft, "object-rotate-left-symbolic"),
         (ImageTransform::RotateRight, "object-rotate-right-symbolic"),
@@ -210,6 +216,7 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
         (ImageTransform::FlipVertical, "object-flip-vertical-symbolic"),
     ] {
         let button = gtk::Button::from_icon_name(icon);
+        transforms.push(button.clone());
         button.add_css_class("flat");
         button.set_tooltip_text(Some(transform.title()));
         button.update_property(&[gtk::accessible::Property::Label(transform.title())]);
@@ -296,6 +303,8 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
         save: save.clone(),
         tools,
         crop: crop.clone(),
+        transforms,
+        smart_redaction: smart,
         crop_bar,
         zoom: zoom.clone(),
         toasts,
@@ -457,6 +466,12 @@ pub fn refresh(editor: &Rc<Editor>) {
         }
         let cropping = editor.interaction.borrow().crop.is_some();
         w.crop.set_active(cropping);
+        // Like macOS, the image can't turn or crop while smart redaction scans it.
+        let scanning = w.smart_redaction.is_running();
+        w.crop.set_sensitive(!scanning);
+        for button in &w.transforms {
+            button.set_sensitive(!scanning);
+        }
         w.crop_bar.set_reveal_child(cropping);
         let (width, height) = model.base_size();
         let mut subtitle = format!("{width:.0} × {height:.0}");
@@ -500,7 +515,14 @@ fn undo_redo(editor: &Rc<Editor>, undo: bool) {
     }
 }
 
+fn is_scanning(editor: &Editor) -> bool {
+    editor.widgets.borrow().as_ref().is_some_and(|w| w.smart_redaction.is_running())
+}
+
 fn apply_transform(editor: &Rc<Editor>, transform: ImageTransform) {
+    if is_scanning(editor) {
+        return;
+    }
     canvas::finish_text(editor);
     editor.interaction.borrow_mut().crop = None;
     let result = editor.model.borrow_mut().transform(transform);
@@ -512,6 +534,10 @@ fn apply_transform(editor: &Rc<Editor>, transform: ImageTransform) {
 }
 
 fn set_crop(editor: &Rc<Editor>, on: bool) {
+    if on && is_scanning(editor) {
+        refresh(editor);
+        return;
+    }
     canvas::finish_text(editor);
     let full = {
         let (w, h) = editor.model.borrow().base_size();

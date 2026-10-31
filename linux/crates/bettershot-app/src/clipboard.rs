@@ -41,3 +41,10 @@ pub fn drag_provider(app: &App, path: &Path) -> Option<gdk::ContentProvider> {
     let files = gdk::FileList::from_array(&[gio::File::for_path(&copy)]);
     Some(gdk::ContentProvider::for_value(&files.to_value()))
 }
+
+/// Puts plain text on the clipboard.
+pub fn copy_text(text: &str) -> Result<(), String> {
+    let display = gdk::Display::default().ok_or("No display is available.")?;
+    display.clipboard().set_text(text);
+    Ok(())
+}

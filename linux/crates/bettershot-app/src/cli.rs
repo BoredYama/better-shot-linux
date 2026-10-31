@@ -31,6 +31,11 @@ pub const CAPTURE_COMMANDS: &[(&str, Action, &str)] = &[
     ("timed-region", Action::TimedRegion, "Select an area after a countdown"),
     ("region-copy", Action::RegionCopy, "Select an area and copy it"),
     ("region-save", Action::RegionSave, "Select an area and save it"),
+    ("region-pin", Action::RegionPin, "Select an area and pin it on screen"),
+    ("scroll", Action::ScrollCapture, "Capture an area while scrolling it; run again to finish"),
+    ("text", Action::Ocr, "Select an area and copy its text"),
+    ("text-single-line", Action::OcrSingleLine, "Copy text without line breaks"),
+    ("color", Action::ColorPicker, "Pick a color and copy its hex value"),
 ];
 
 /// The command a desktop keyboard shortcut should run for an action.
@@ -114,10 +119,10 @@ fn from_url_action(action: CaptureUrlAction) -> Result<Command, String> {
         CaptureUrlAction::Fullscreen => Command::Capture(Action::Fullscreen),
         CaptureUrlAction::Window => Command::Capture(Action::Window),
         CaptureUrlAction::Settings => Command::Settings,
-        CaptureUrlAction::ScrollCapture => return Err("Scrolling capture is not available on Linux yet.".into()),
+        CaptureUrlAction::ScrollCapture => Command::Capture(Action::ScrollCapture),
         CaptureUrlAction::Recording => return Err("Screen recording is not available on Linux yet.".into()),
-        CaptureUrlAction::Ocr => return Err("Text capture is not available on Linux yet.".into()),
-        CaptureUrlAction::ColorPicker => return Err("The color picker is not available on Linux yet.".into()),
+        CaptureUrlAction::Ocr => Command::Capture(Action::Ocr),
+        CaptureUrlAction::ColorPicker => Command::Capture(Action::ColorPicker),
     })
 }
 
@@ -150,6 +155,9 @@ mod tests {
         assert_eq!(parse_str(&["bettershot://settings"]), Ok(Command::Settings));
         assert!(parse_str(&["bettershot://capture/region?x=1"]).is_err(), "malformed URLs are rejected");
         assert!(parse_str(&["bettershot://record"]).unwrap_err().contains("not available"));
+        assert_eq!(parse_str(&["bettershot://ocr"]), Ok(Command::Capture(Action::Ocr)));
+        assert_eq!(parse_str(&["bettershot://capture/scroll"]), Ok(Command::Capture(Action::ScrollCapture)));
+        assert_eq!(parse_str(&["bettershot://color-picker"]), Ok(Command::Capture(Action::ColorPicker)));
         assert_eq!(parse_str(&["file:///tmp/My%20Shot.png"]), Ok(Command::Edit("/tmp/My Shot.png".into())));
         assert!(parse_str(&["file://server/share.png"]).is_err());
         let file = std::env::temp_dir().join(format!("bettershot-cli-{}.png", std::process::id()));

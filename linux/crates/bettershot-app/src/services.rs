@@ -9,7 +9,7 @@ use gtk::glib;
 use std::path::PathBuf;
 
 /// Global actions that work in this phase, in menu order.
-pub const AVAILABLE_GLOBAL_ACTIONS: [Action; 7] = [
+pub const AVAILABLE_GLOBAL_ACTIONS: &[Action] = &[
     Action::Region,
     Action::Fullscreen,
     Action::Window,
@@ -17,6 +17,11 @@ pub const AVAILABLE_GLOBAL_ACTIONS: [Action; 7] = [
     Action::TimedRegion,
     Action::RegionCopy,
     Action::RegionSave,
+    Action::RegionPin,
+    Action::ScrollCapture,
+    Action::Ocr,
+    Action::OcrSingleLine,
+    Action::ColorPicker,
 ];
 
 /// The icons folder when running from a source checkout, so the clover icon
@@ -53,6 +58,9 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         entry("Capture Window", "window-new-symbolic", Action::Window),
         entry("Capture Previous Region", "view-refresh-symbolic", Action::PreviousRegion),
         entry("Capture Region with Timer", "alarm-symbolic", Action::TimedRegion),
+        entry("Scrolling Capture", "view-continuous-symbolic", Action::ScrollCapture),
+        entry("Capture Text", "insert-text-symbolic", Action::Ocr),
+        entry("Pick Color", "color-select-symbolic", Action::ColorPicker),
         TrayEntry {
             label: "Settings…".into(),
             icon: "preferences-system-symbolic",

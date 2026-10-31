@@ -1,6 +1,7 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0–2 complete (core, CI, screenshot app, image editor). Phase 3 is next.
+Status: Phases 0–3 complete (core, CI, screenshot app, image editor, capture
+extras). Phase 4 is next.
 
 ## What is being ported
 
@@ -213,11 +214,33 @@ editor in `bettershot-app`. Decisions and gaps:
   progressive blur (kept verbatim in sidecars), shape copy/paste and z-order
   commands, editable editor shortcuts, and applying Default Look to deck cards.
 
-### Phase 3: Capture extras
+### Phase 3: Capture extras (done)
 - OCR (Tesseract, empty result never clears the clipboard), color picker, smart
   redaction with Tesseract word boxes.
-- Pinned screenshots, scrolling capture (port `ScrollFrameAnalyzer` and stitching,
-  with PipeWire frames as the source).
+- Pinned screenshots, scrolling capture (port `ScrollFrameAnalyzer` and stitching).
+
+Decisions made while building it:
+
+- Tesseract runs as the `tesseract` command with TSV output rather than through
+  library bindings: no build-time C dependency, and the word boxes it reports
+  locate smart-redaction matches (partial words by character share). Images up
+  to 2600 px are enlarged 2–3× first; input is written as PPM. `zbarimg`, when
+  installed, adds barcode payloads ahead of the text, as Vision does on macOS.
+- Capture Text uses BetterShot's still-frame selector, capturing on release
+  and leaving the remembered area alone, like macOS's native OCR selector.
+- Pick Color uses the Screenshot portal's PickColor, falling back to a loupe
+  over a still frame where no portal implements it.
+- Pins are undecorated GTK windows. Wayland gives apps no always-on-top or
+  window placement, so pins rely on the desktop's Always on Top and placement.
+- Scrolling capture replaces Vision registration with a search over sampled
+  rows that scores each shift by matching textured rows. Frames come from the
+  Screenshot portal when the user chooses Add Frame (the session window is
+  hidden for each grab), because Wayland exposes neither other apps' scroll
+  events nor a way to exclude BetterShot's windows from screenshots. Automatic
+  frames and Auto Scroll would need a ScreenCast stream and the RemoteDesktop
+  portal; revisit with Phase 5's PipeWire work.
+- Not yet: video pins (with recording) and the macOS scroll preferences
+  (`scrollMaxHeight`, frozen-header detection), which use their defaults.
 
 ### Phase 4: Sharing and library
 - R2 credentials in Secret Service, SigV4 uploads, share manifests and posters,

@@ -17,14 +17,17 @@ pub mod imaging;
 pub mod onboarding;
 pub mod overlay_layout;
 pub mod paths;
+pub mod pin;
 pub mod prefs;
 pub mod r2;
 pub mod region;
 pub mod release_notes;
+pub mod scroll_capture;
 pub mod share;
 pub mod shortcuts;
 pub mod swift_codable;
 pub mod swift_date;
+pub mod text_recognition;
 pub mod url_action;
 pub mod version;
 

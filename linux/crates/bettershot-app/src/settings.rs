@@ -407,7 +407,7 @@ fn shortcuts_page(app: &App) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder().title("Shortcuts").icon_name("input-keyboard-symbolic").build();
     let global = group("Global shortcuts", "");
     let mut rows = Vec::new();
-    for action in services::AVAILABLE_GLOBAL_ACTIONS {
+    for &action in services::AVAILABLE_GLOBAL_ACTIONS {
         let command = cli::command_for(action).unwrap_or_default();
         let row = adw::ActionRow::new();
         plain_text(&row, action.title(), &command);

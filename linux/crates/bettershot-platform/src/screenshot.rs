@@ -58,6 +58,15 @@ pub async fn capture_interactive(
     portal_screenshot(parent, true, private_dir).await
 }
 
+/// Lets the user pick a pixel with the desktop's own color picker. Returns
+/// sRGB components in 0...1.
+pub async fn pick_color(parent: Option<&WindowIdentifier>) -> Result<(f64, f64, f64), CaptureError> {
+    let proxy = ScreenshotProxy::new().await.map_err(classify)?;
+    let request = proxy.pick_color(parent, Default::default()).await.map_err(classify)?;
+    let color = request.response().map_err(classify)?;
+    Ok((color.red(), color.green(), color.blue()))
+}
+
 async fn portal_screenshot(
     parent: Option<&WindowIdentifier>,
     interactive: bool,

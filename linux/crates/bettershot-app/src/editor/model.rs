@@ -9,6 +9,7 @@ use bettershot_core::annotation::swatch::Swatch;
 use bettershot_core::annotation::transform::{self, ImageTransform};
 use bettershot_core::annotation::undo::UndoStack;
 use bettershot_core::imaging::{self, EncodeOptions};
+use bettershot_core::text_recognition::NormRect;
 use image::RgbaImage;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -374,6 +375,38 @@ impl EditorModel {
         }
     }
 
+    /// Port of `applySmartRedactionRegions`: adds a Pixelate or Blur shape
+    /// over each normalized region as one undoable edit, selects them, and
+    /// returns how many were added. Regions under 2 px are skipped.
+    pub fn add_smart_redactions(&mut self, regions: &[NormRect], tool: Tool) -> usize {
+        let (width, height) = self.base_size();
+        let shapes: Vec<AnnoShape> = regions
+            .iter()
+            .filter_map(|region| {
+                let (x, y, w, h) = (region.x * width, region.y * height, region.w * width, region.h * height);
+                if w < 2.0 || h < 2.0 {
+                    return None;
+                }
+                let kind = ShapeKind::Redaction(RedactionProps {
+                    kind: if tool == Tool::Blur { RedactionKind::Blur } else { RedactionKind::Pixelate },
+                    w,
+                    h,
+                    density: self.style.density,
+                });
+                Some(AnnoShape::new(x, y, kind))
+            })
+            .collect();
+        if shapes.is_empty() {
+            return 0;
+        }
+        self.checkpoint();
+        self.selection = shapes.iter().map(|s| s.id.clone()).collect();
+        let count = shapes.len();
+        self.current.shapes.extend(shapes);
+        self.tool = if self.tool == tool { Tool::Select } else { tool };
+        count
+    }
+
     /// The next number for a numbered callout.
     pub fn next_number(&self) -> i64 {
         self.current
@@ -501,6 +534,26 @@ mod tests {
         assert!(model.current.shapes.is_empty());
         assert!(model.undo());
         assert_eq!(model.current.shapes.len(), 3);
+    }
+
+    #[test]
+    fn smart_redactions_are_one_undoable_edit() {
+        let (_dir, mut model) = model();
+        let regions = [
+            NormRect { x: 0.25, y: 0.5, w: 0.5, h: 0.25 },
+            NormRect { x: 0.0, y: 0.0, w: 0.01, h: 0.5 }, // under 2 px wide
+        ];
+        assert_eq!(model.add_smart_redactions(&regions, Tool::Blur), 1);
+        let shape = &model.current.shapes[0];
+        assert_eq!((shape.x, shape.y), (10.0, 10.0));
+        assert!(
+            matches!(&shape.kind, ShapeKind::Redaction(p) if p.kind == RedactionKind::Blur && p.w == 20.0 && p.h == 5.0)
+        );
+        assert_eq!(model.selection, vec![shape.id.clone()]);
+        assert_eq!(model.tool, Tool::Blur);
+        assert_eq!(model.add_smart_redactions(&[], Tool::Blur), 0);
+        assert!(model.undo());
+        assert!(model.current.shapes.is_empty());
     }
 
     #[test]

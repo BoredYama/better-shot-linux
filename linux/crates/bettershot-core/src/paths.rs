@@ -3,13 +3,16 @@
 //! so they never touch a real profile.
 
 use std::env;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub const APP_ID: &str = "site.bettershot.BetterShot";
 const DIRECTORY_NAME: &str = "bettershot";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppDirs {
+    /// The default save folder for deliverables.
+    pub pictures: PathBuf,
     /// `settings.json` and other small preference files.
     pub config: PathBuf,
     /// History, staged captures, and recording projects.
@@ -34,6 +37,7 @@ impl AppDirs {
             let root = non_empty("BETTERSHOT_TEST_ROOT")
                 .unwrap_or_else(|| env::temp_dir().join(format!("bettershot-tests-{}", std::process::id())));
             return Self {
+                pictures: root.join("Pictures"),
                 config: root.join("config"),
                 data: root.join("data"),
                 cache: root.join("cache"),
@@ -45,8 +49,14 @@ impl AppDirs {
         let runtime = non_empty("XDG_RUNTIME_DIR")
             .map(|dir| dir.join(DIRECTORY_NAME))
             .unwrap_or_else(|| base("XDG_CACHE_HOME", ".cache").join(DIRECTORY_NAME).join("runtime"));
+        let config_home = base("XDG_CONFIG_HOME", ".config");
+        let pictures = fs::read_to_string(config_home.join("user-dirs.dirs"))
+            .ok()
+            .and_then(|text| user_dir(&text, "XDG_PICTURES_DIR", &home))
+            .unwrap_or_else(|| home.join("Pictures"));
         Self {
-            config: base("XDG_CONFIG_HOME", ".config").join(DIRECTORY_NAME),
+            pictures,
+            config: config_home.join(DIRECTORY_NAME),
             data: base("XDG_DATA_HOME", ".local/share").join(DIRECTORY_NAME),
             cache: base("XDG_CACHE_HOME", ".cache").join(DIRECTORY_NAME),
             runtime,
@@ -57,18 +67,46 @@ impl AppDirs {
         self.config.join("settings.json")
     }
 
+    /// Captures BetterShot keeps for Edit, Pin, Share, and the gallery.
+    pub fn library(&self) -> PathBuf {
+        self.data.join("Library")
+    }
+
     pub fn history_file(&self) -> PathBuf {
-        self.data.join("history.json")
+        self.library().join("history.json")
     }
 
     /// Captures waiting in the capture deck before any explicit save.
     pub fn staging(&self) -> PathBuf {
-        self.data.join("Staging")
+        self.data.join("deck")
+    }
+
+    /// The default folder for saved screenshots, like GNOME's.
+    pub fn default_save_directory(&self) -> PathBuf {
+        self.pictures.join("Screenshots")
+    }
+
+    /// Private, short-lived copies (clipboard files, drag files), each in a
+    /// folder of its own so two copies of one capture stay apart.
+    pub fn scratch_folder(&self, purpose: &str) -> PathBuf {
+        self.runtime.join(purpose).join(uuid::Uuid::new_v4().to_string())
     }
 
     pub fn recordings(&self) -> PathBuf {
         self.data.join("Recordings")
     }
+}
+
+/// Reads one entry of `user-dirs.dirs`, e.g. `XDG_PICTURES_DIR="$HOME/Pictures"`.
+fn user_dir(text: &str, key: &str, home: &Path) -> Option<PathBuf> {
+    let line = text.lines().map(str::trim).find(|line| line.starts_with(key) && line[key.len()..].starts_with('='))?;
+    let value = line[key.len() + 1..].trim().trim_matches('"');
+    let path = match value.strip_prefix("$HOME") {
+        Some(rest) => home.join(rest.trim_start_matches('/')),
+        None => PathBuf::from(value),
+    };
+    // A user directory set to $HOME itself means "disabled".
+    (path.is_absolute() && path != home).then_some(path)
 }
 
 #[cfg(test)]
@@ -100,6 +138,19 @@ mod tests {
             PathBuf::from("/home/a/.local/share/bettershot"),
             "relative XDG paths are ignored per the spec"
         );
+    }
+
+    #[test]
+    fn reads_the_pictures_user_directory() {
+        let home = Path::new("/home/a");
+        let text = "# comment\nXDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_PICTURES_DIR=\"$HOME/Bilder\"\n";
+        assert_eq!(user_dir(text, "XDG_PICTURES_DIR", home), Some(PathBuf::from("/home/a/Bilder")));
+        assert_eq!(user_dir("XDG_PICTURES_DIR=\"$HOME/\"", "XDG_PICTURES_DIR", home), None);
+        assert_eq!(
+            user_dir("XDG_PICTURES_DIR=\"/data/pics\"", "XDG_PICTURES_DIR", home),
+            Some(PathBuf::from("/data/pics"))
+        );
+        assert_eq!(user_dir("", "XDG_PICTURES_DIR", home), None);
     }
 
     #[test]

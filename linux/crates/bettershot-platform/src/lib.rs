@@ -1,0 +1,10 @@
+//! Linux desktop integration for BetterShot: the xdg-desktop-portal Screenshot
+//! and GlobalShortcuts interfaces, a StatusNotifierItem tray, and capture
+//! fallbacks. Futures here run on the GTK main loop (`glib::spawn_future_local`);
+//! D-Bus I/O uses zbus's own `async-io` thread, so no tokio runtime is needed.
+
+pub mod global_shortcuts;
+pub mod screenshot;
+pub mod tray;
+
+pub use ashpd::WindowIdentifier;

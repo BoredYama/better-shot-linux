@@ -12,6 +12,7 @@ base64.workspace = true
 chrono.workspace = true
 hex.workspace = true
 hmac.workspace = true
+image.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true

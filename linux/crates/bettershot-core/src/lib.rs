@@ -4,10 +4,15 @@
 //! and other GUI dependencies so it can be tested headlessly. Each module names
 //! the Swift file it follows; when behavior changes in one, change the other.
 
+pub mod after_capture;
+pub mod app_prefs;
 pub mod background;
 pub mod capture_record;
+pub mod deck;
 pub mod file_naming;
 pub mod geometry;
+pub mod history;
+pub mod imaging;
 pub mod onboarding;
 pub mod overlay_layout;
 pub mod paths;

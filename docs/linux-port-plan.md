@@ -1,6 +1,6 @@
 # BetterShot for Linux: port plan
 
-Status: Phase 0 complete (core crate, CI). Phase 1 is next.
+Status: Phases 0 and 1 complete (core crate, CI, screenshot app). Phase 2 is next.
 
 ## What is being ported
 
@@ -157,7 +157,7 @@ made along the way:
   and share manifests use the same JSON as the macOS app.
 - Application ID: `site.bettershot.BetterShot`.
 
-### Phase 1: Screenshot MVP
+### Phase 1: Screenshot MVP (done)
 - Single-instance GTK application with D-Bus actions and the `bettershot` CLI.
 - Region (frozen selector with remembered previous region), fullscreen, window,
   and capture-previous-region screenshots; countdown delay.
@@ -165,6 +165,25 @@ made along the way:
   with retry, clipboard image + file reference copy.
 - Floating capture deck: Copy, Save, Edit, Pin, Share, drag-out, Hide After.
 - Tray menu, global shortcuts via portal, basic Settings (General, Capture, Shortcuts).
+
+Delivered as `bettershot-platform` and `bettershot-app`, with the pipeline in
+`bettershot-core::deck`. Decisions and gaps:
+
+- The region selector always uses a still frame (Wayland cannot read the
+  live screen behind an overlay). Window capture uses the portal's own dialog.
+- The portal's screenshot file is moved into the private runtime folder, so
+  nothing reaches Pictures until a save.
+- Global shortcuts are offered to the GlobalShortcuts portal as preferred
+  triggers. Without the portal, Settings shows a `bettershot capture ...`
+  command per action to bind in the desktop's keyboard settings.
+- Ubuntu 24.04 has no gtk4-layer-shell package, so the deck is a normal
+  undecorated window the desktop places. Layer shell for KDE/wlroots is a
+  later improvement.
+- Not yet: Default Look backgrounds on new captures (needs the phase 2
+  renderer), Edit/Pin/Share on cards, onboarding, the Media Gallery, and an
+  editable shortcut recorder for editor shortcuts.
+- `scripts/check-ui.sh` drives the real app under Xvfb + Openbox with a fixture
+  screen in light and dark appearances; CI runs it.
 
 ### Phase 2: Image editor
 - Port the geometry and stroke pipeline (`Vec`, `Mat`, `StrokeOutline`,

@@ -28,13 +28,20 @@ jobs:
   check:
     name: Format, lint, and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
       BETTERSHOT_TESTING: "1"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install GTK, libadwaita, and validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev desktop-file-utils appstream \
+            xvfb openbox xdotool imagemagick python3-pil dbus
 
       - name: Install Rust
         run: |
@@ -61,3 +68,21 @@ jobs:
 
       - name: Release build
         run: cargo build --workspace --release --locked
+
+      - name: Validate desktop entry and AppStream metadata
+        run: |
+          desktop-file-validate data/site.bettershot.BetterShot.desktop
+          appstreamcli validate --no-net data/site.bettershot.BetterShot.metainfo.xml
+
+      - name: UI smoke check under Xvfb
+        run: |
+          cargo build --workspace --locked
+          bash scripts/check-ui.sh
+
+      - name: Upload UI snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ui-snapshots
+          path: linux/target/ui-snapshots
+          if-no-files-found: ignore

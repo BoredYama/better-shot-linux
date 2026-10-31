@@ -1,0 +1,42 @@
+/* BetterShot uses libadwaita's own colors so light, dark, and high-contrast
+   appearances all follow the system. */
+
+.selector-hint {
+  background-color: alpha(black, 0.72);
+  color: white;
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+
+.countdown {
+  font-size: 96px;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  min-width: 180px;
+  min-height: 180px;
+  border-radius: 36px;
+}
+
+.capture-card {
+  border-radius: 12px;
+}
+
+.capture-card picture {
+  border-radius: 12px;
+}
+
+.capture-card .card-action {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  margin: 6px;
+}
+
+.capture-card .card-status {
+  font-size: smaller;
+  font-feature-settings: "tnum";
+}
+
+.capture-card .card-status.error {
+  color: @error_color;
+}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>site.bettershot.BetterShot</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>BSD-3-Clause</project_license>
+  <name>BetterShot</name>
+  <summary>Capture, edit, and share your screen</summary>
+  <description>
+    <p>
+      BetterShot takes screenshots of an area, the whole screen, or a window.
+      Select from a still frame of your screen, adjust the area, and capture it
+      at full resolution.
+    </p>
+    <p>
+      Each capture stays private in a floating card until you copy, save, or
+      drag it into another app. Captures can also be saved to your Screenshots
+      folder automatically.
+    </p>
+  </description>
+  <launchable type="desktop-id">site.bettershot.BetterShot.desktop</launchable>
+  <url type="homepage">https://bettershot.site</url>
+  <url type="bugtracker">https://github.com/BoredYama/better-shot-linux/issues</url>
+  <url type="vcs-browser">https://github.com/BoredYama/better-shot-linux</url>
+  <developer id="site.bettershot">
+    <name>BetterShot contributors</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <provides>
+    <binary>bettershot</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <releases>
+    <release version="0.5.9" date="2026-10-11" />
+  </releases>
+</component>

@@ -197,6 +197,12 @@ fn general_page(app: &App, window: &adw::PreferencesWindow) -> adw::PreferencesP
         |active| App::get().set_pref(keys::COPY_AFTER_SAVE, active),
     ));
     after.add(&switch_row(
+        "Open the editor",
+        "Open each new screenshot in the image editor. Capture & Copy skips it.",
+        app.with_prefs(|p| p.open_editor_after_capture()),
+        |active| App::get().set_pref(keys::OPEN_EDITOR_AFTER_CAPTURE, active),
+    ));
+    after.add(&switch_row(
         "Play shutter sound",
         "Uses your sound theme’s camera shutter.",
         app.with_prefs(|p| p.play_sound()),

@@ -5,6 +5,7 @@
 //! the Swift file it follows; when behavior changes in one, change the other.
 
 pub mod after_capture;
+pub mod annotation;
 pub mod app_prefs;
 pub mod background;
 pub mod capture_record;
@@ -22,6 +23,7 @@ pub mod region;
 pub mod release_notes;
 pub mod share;
 pub mod shortcuts;
+pub mod swift_codable;
 pub mod swift_date;
 pub mod url_action;
 pub mod version;

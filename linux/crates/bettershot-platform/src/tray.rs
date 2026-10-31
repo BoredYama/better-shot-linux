@@ -11,6 +11,7 @@ use ksni::menu::{MenuItem, StandardItem};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
     Capture(Action),
+    OpenImage,
     OpenSettings,
     Quit,
 }

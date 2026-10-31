@@ -86,6 +86,7 @@ pub fn start_tray(app: &App) {
             match command {
                 TrayCommand::Capture(action) => capture::perform(action),
                 TrayCommand::OpenSettings => settings::present(&App::get()),
+                TrayCommand::OpenImage => crate::editor::open_file_dialog(&App::get()),
                 TrayCommand::Quit => app::quit_app(),
             }
         }

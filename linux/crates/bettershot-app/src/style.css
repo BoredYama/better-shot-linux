@@ -40,3 +40,26 @@
 .capture-card .card-status.error {
   color: @error_color;
 }
+
+.image-editor .toolbar {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.editor-inspector .swatch,
+.editor-inspector .background-tile {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px;
+}
+
+.editor-inspector .alignment-cell {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  -gtk-icon-size: 8px;
+}
+
+.editor-inspector .alignment-cell:checked {
+  color: @accent_color;
+}

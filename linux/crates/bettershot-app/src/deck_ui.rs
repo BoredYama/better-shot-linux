@@ -2,8 +2,8 @@
 //! to another app, and Hide After. A port of the screenshot parts of
 //! `Sources/Preview/PreviewOverlay.swift`.
 //!
-//! Edit, Pin, and Share arrive with the editor (phase 2), pinned images
-//! (phase 3), and cloud sharing (phase 4); until then their slots stay empty.
+//! Pin and Share arrive with pinned images (phase 3) and cloud sharing
+//! (phase 4); until then their slots stay empty.
 //!
 //! Wayland does not let apps place their own windows, so the deck is a small
 //! window the desktop positions. It can be moved by dragging its background.
@@ -110,7 +110,7 @@ fn slot_alignment(slot: OverlayToolSlot) -> (gtk::Align, gtk::Align) {
 
 /// Tools that work in this phase.
 fn is_available(tool: OverlayTool) -> bool {
-    matches!(tool, OverlayTool::Copy | OverlayTool::Save | OverlayTool::Dismiss)
+    matches!(tool, OverlayTool::Copy | OverlayTool::Save | OverlayTool::Dismiss | OverlayTool::Edit)
 }
 
 impl Card {
@@ -136,7 +136,7 @@ impl Card {
         }
         let name = capture_title(app, &processed.display);
         picture.set_alternative_text(Some(&format!("Screenshot {name}")));
-        picture.set_tooltip_text(Some(&format!("{name}\nDrag to another app, or double-click to open")));
+        picture.set_tooltip_text(Some(&format!("{name}\nDrag to another app, or double-click to edit")));
 
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&picture));
@@ -191,7 +191,8 @@ impl Card {
                     OverlayTool::Copy => card.copy(),
                     OverlayTool::Save => card.save(),
                     OverlayTool::Dismiss => card.dismiss(),
-                    OverlayTool::Edit | OverlayTool::Pin | OverlayTool::Share => {}
+                    OverlayTool::Edit => card.edit(),
+                    OverlayTool::Pin | OverlayTool::Share => {}
                 }
             });
             overlay.add_overlay(&button);
@@ -255,8 +256,7 @@ impl Card {
         click.connect_pressed(move |_, presses, _, _| {
             if presses == 2 {
                 if let Some(inner) = weak.upgrade() {
-                    let file = gio::File::for_path(&*inner.display.borrow());
-                    gtk::FileLauncher::new(Some(&file)).launch(None::<&gtk::Window>, None::<&gio::Cancellable>, |_| {});
+                    Card(inner).edit();
                 }
             }
         });
@@ -268,6 +268,11 @@ impl Card {
             card.set_status(&saved_message(&processed.display), false);
         }
         card
+    }
+
+    fn picture(&self) -> Option<gtk::Picture> {
+        let overlay = self.0.root.first_child()?.downcast::<gtk::Overlay>().ok()?;
+        overlay.child()?.downcast::<gtk::Picture>().ok()
     }
 
     fn display(&self) -> PathBuf {
@@ -284,6 +289,12 @@ impl Card {
             self.0.status.remove_css_class("error");
             self.0.status.add_css_class("dim-label");
         }
+    }
+
+    /// Opens the image editor; the card stays until it hides or is dismissed.
+    pub fn edit(&self) {
+        self.cancel_timer();
+        crate::editor::open(&App::get(), &self.display());
     }
 
     pub fn copy(&self) {
@@ -391,6 +402,30 @@ impl Card {
                 deck.window.set_visible(false);
             }
         });
+    }
+}
+
+/// After the editor saves, the card that showed the capture shows the saved
+/// file, with a fresh thumbnail.
+pub fn retarget(app: &App, record_id: Option<uuid::Uuid>, opened_from: &Path, saved: &Path) {
+    let cards = DECK.with(|deck| deck.borrow().as_ref().map(|d| d.cards.clone()).unwrap_or_default());
+    for card in cards {
+        let display = card.display();
+        let same_record = record_id.is_some() && {
+            let state = app.state();
+            state.history.record_matching(&display).map(|r| r.id) == record_id
+        };
+        if display != opened_from && !same_record {
+            continue;
+        }
+        app.state_mut().deck.discard(&display);
+        *card.0.display.borrow_mut() = saved.to_path_buf();
+        if let Some(picture) = card.picture() {
+            picture.set_file(Some(&gio::File::for_path(saved)));
+        }
+        card.0.retry.set_visible(false);
+        card.set_status(&saved_message(saved), false);
+        card.schedule_hide(app);
     }
 }
 

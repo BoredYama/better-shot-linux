@@ -12,6 +12,10 @@ pub enum Command {
     /// Started at login: stay in the tray.
     Background,
     Capture(Action),
+    /// Open an image in the editor.
+    Edit(String),
+    /// Choose an image to open in the editor.
+    OpenImage,
     Settings,
     Quit,
     Help,
@@ -39,7 +43,7 @@ pub fn command_for(action: Action) -> Option<String> {
 
 pub fn help() -> String {
     let mut text = String::from(
-        "Usage: bettershot [COMMAND]\n\nCommands:\n  (none)                     Open BetterShot\n  --background               Start in the tray without opening a window\n  settings                   Open Settings\n  quit                       Quit the running instance\n",
+        "Usage: bettershot [COMMAND]\n\nCommands:\n  (none)                     Open BetterShot\n  --background               Start in the tray without opening a window\n  settings                   Open Settings\n  edit FILE                  Open an image in the editor\n  open-image                 Choose an image to edit\n  quit                       Quit the running instance\n",
     );
     for (name, _, description) in CAPTURE_COMMANDS {
         text.push_str(&format!("  {:<27}{description}\n", format!("capture {name}")));
@@ -58,18 +62,50 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         ["-h"] | ["--help"] | ["help"] => Ok(Command::Help),
         ["-V"] | ["--version"] => Ok(Command::Version),
         ["settings"] => Ok(Command::Settings),
+        ["open-image"] => Ok(Command::OpenImage),
+        ["edit", path] => Ok(Command::Edit((*path).to_owned())),
         ["quit"] => Ok(Command::Quit),
         ["capture", name] => CAPTURE_COMMANDS
             .iter()
             .find(|(candidate, _, _)| candidate == name)
             .map(|(_, action, _)| Command::Capture(*action))
             .ok_or_else(|| format!("Unknown capture mode \"{name}\".\n\n{}", help())),
+        // "Open With" from a file manager passes a file URI or path.
+        [uri] if uri.starts_with("file://") => {
+            file_uri_path(uri).map(Command::Edit).ok_or_else(|| format!("Unsupported file address: {uri}"))
+        }
+        [path] if !path.contains("://") && std::path::Path::new(path).is_file() => {
+            Ok(Command::Edit((*path).to_owned()))
+        }
         [url] if url.contains("://") => match CaptureUrlAction::from_url(url) {
             Some(action) => from_url_action(action),
             None => Err(format!("Unsupported BetterShot URL: {url}")),
         },
         _ => Err(format!("Unknown command: {}\n\n{}", args.join(" "), help())),
     }
+}
+
+/// A local path from a `file://` URI, percent-decoded.
+fn file_uri_path(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let path = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !path.starts_with('/') {
+        return None;
+    }
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 fn from_url_action(action: CaptureUrlAction) -> Result<Command, String> {
@@ -100,6 +136,8 @@ mod tests {
         assert_eq!(parse_str(&["capture", "region"]), Ok(Command::Capture(Action::Region)));
         assert_eq!(parse_str(&["capture", "previous-region"]), Ok(Command::Capture(Action::PreviousRegion)));
         assert_eq!(parse_str(&["settings"]), Ok(Command::Settings));
+        assert_eq!(parse_str(&["edit", "/tmp/a.png"]), Ok(Command::Edit("/tmp/a.png".into())));
+        assert_eq!(parse_str(&["open-image"]), Ok(Command::OpenImage));
         assert!(parse_str(&["capture", "nope"]).is_err());
         assert!(parse_str(&["capture"]).is_err());
         assert!(parse_str(&["frobnicate"]).is_err());
@@ -112,6 +150,12 @@ mod tests {
         assert_eq!(parse_str(&["bettershot://settings"]), Ok(Command::Settings));
         assert!(parse_str(&["bettershot://capture/region?x=1"]).is_err(), "malformed URLs are rejected");
         assert!(parse_str(&["bettershot://record"]).unwrap_err().contains("not available"));
+        assert_eq!(parse_str(&["file:///tmp/My%20Shot.png"]), Ok(Command::Edit("/tmp/My Shot.png".into())));
+        assert!(parse_str(&["file://server/share.png"]).is_err());
+        let file = std::env::temp_dir().join(format!("bettershot-cli-{}.png", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(parse_str(&[file.to_str().unwrap()]), Ok(Command::Edit(file.to_string_lossy().into_owned())));
+        std::fs::remove_file(file).unwrap();
     }
 
     #[test]

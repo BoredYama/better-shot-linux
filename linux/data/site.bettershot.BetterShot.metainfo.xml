@@ -16,6 +16,12 @@
       drag it into another app. Captures can also be saved to your Screenshots
       folder automatically.
     </p>
+    <p>
+      The editor adds arrows, shapes, text, numbered markers, highlights, blur,
+      and pixelation, crops, rotates, and flips, and frames screenshots with
+      gradient or image backgrounds, padding, rounded corners, and shadows.
+      Edits stay editable after saving.
+    </p>
   </description>
   <launchable type="desktop-id">site.bettershot.BetterShot.desktop</launchable>
   <url type="homepage">https://bettershot.site</url>

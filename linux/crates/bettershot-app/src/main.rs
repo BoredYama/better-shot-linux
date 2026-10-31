@@ -6,6 +6,7 @@ mod cli;
 mod clipboard;
 mod countdown;
 mod deck_ui;
+mod editor;
 mod selector;
 mod services;
 mod settings;

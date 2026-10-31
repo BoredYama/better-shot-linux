@@ -22,14 +22,7 @@ pub enum BackgroundStyle {
     BundledImage(String),
 }
 
-#[derive(Serialize, Deserialize)]
-struct Payload<T> {
-    #[serde(rename = "_0")]
-    value: T,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Empty {}
+use crate::swift_codable::{Empty, Payload};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

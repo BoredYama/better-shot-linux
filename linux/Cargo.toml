@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/bettershot-core", "crates/bettershot-platform", "crates/bettershot-app"]
+members = ["crates/bettershot-core", "crates/bettershot-render", "crates/bettershot-platform", "crates/bettershot-app"]
 
 [workspace.package]
 edition = "2021"
 license = "BSD-3-Clause"
 repository = "https://github.com/BoredYama/better-shot-linux"
-rust-version = "1.80"
+rust-version = "1.92"
 
 [workspace.dependencies]
 adw = { version = "0.9", package = "libadwaita", features = ["v1_5"] }
@@ -14,6 +14,10 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "g
 async-channel = "2"
 bettershot-core = { path = "crates/bettershot-core" }
 bettershot-platform = { path = "crates/bettershot-platform" }
+bettershot-render = { path = "crates/bettershot-render" }
+cairo-rs = { version = "0.22", features = ["png"] }
+pango = { version = "0.22", features = ["v1_50"] }
+pangocairo = "0.22"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_14"] }
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }

@@ -16,11 +16,15 @@ adw.workspace = true
 async-channel.workspace = true
 bettershot-core.workspace = true
 bettershot-platform.workspace = true
+bettershot-render.workspace = true
 chrono.workspace = true
 gtk.workspace = true
 image.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

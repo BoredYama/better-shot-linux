@@ -1,6 +1,6 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0 and 1 complete (core crate, CI, screenshot app). Phase 2 is next.
+Status: Phases 0–2 complete (core, CI, screenshot app, image editor). Phase 3 is next.
 
 ## What is being ported
 
@@ -45,7 +45,7 @@ not feel native, and Wayland capture still needs native code).
 | ScreenCaptureKit (screenshots) | Screenshot portal; X11 direct grab as a fallback |
 | ScreenCaptureKit (recording) | ScreenCast portal → PipeWire → GStreamer `pipewiresrc` |
 | AVFoundation export / VideoToolbox | GStreamer (`x264enc`, `vah264enc`/`vaapih264enc`, `mp4mux`, `qtmux`) |
-| Core Graphics / Core Image drawing | `tiny-skia` for one shared CPU rendering path used by preview **and** export |
+| Core Graphics / Core Image drawing | cairo + Pango (`bettershot-render`), one shared rendering path used by preview **and** export |
 | Metal (3D shots, blur kernels) | `wgpu` (Vulkan/GL), WGSL ports of the kernels |
 | Vision OCR / smart redaction | Tesseract (`leptess`), language packs from the distro |
 | Speech (subtitles, teleprompter tracking) | Optional `whisper.cpp` (`whisper-rs`), off by default |
@@ -70,7 +70,7 @@ linux/
                              gradient presets, preferences, shortcut catalog, URL actions,
                              history/retention, share manifest, R2 SigV4, geometry,
                              zoom springs, clip timeline math, 3D projection math
-    bettershot-render/       tiny-skia renderer: annotations, backgrounds, frames,
+    bettershot-render/       cairo/Pango renderer: annotations, backgrounds, frames,
                              shadows, blur/pixelate, cursor artwork. Shared by
                              preview and export.
     bettershot-platform/     portals, PipeWire/GStreamer, clipboard, tray,
@@ -185,7 +185,7 @@ Delivered as `bettershot-platform` and `bettershot-app`, with the pipeline in
 - `scripts/check-ui.sh` drives the real app under Xvfb + Openbox with a fixture
   screen in light and dark appearances; CI runs it.
 
-### Phase 2: Image editor
+### Phase 2: Image editor (done)
 - Port the geometry and stroke pipeline (`Vec`, `Mat`, `StrokeOutline`,
   `Arrowheads`, `CurvedArrow`, `PerfectDash`, ...) and `AnnoShapeDrawing` into
   `bettershot-render`.
@@ -194,6 +194,24 @@ Delivered as `bettershot-platform` and `bettershot-app`, with the pipeline in
 - Background, padding, corner radius, shadow, aspect ratio, borders, watermark;
   Default Look from General.
 - Save/Export/Copy semantics from AGENTS.md; `AnnotationDocument` JSON compatibility.
+
+Delivered as `bettershot-core::annotation`, `bettershot-render`, and the
+editor in `bettershot-app`. Decisions and gaps:
+
+- The renderer is cairo + Pango rather than tiny-skia: annotations need text
+  shaping with system fonts, and cairo ships with every GTK install. Preview
+  and export share `draw_canvas`.
+- Edits live beside the capture in the library: `Name.edited.png` (composite),
+  `Name.edited.png.bettershot` (macOS-format sidecar), and
+  `Name.edited.base.png` after a crop or turn. Save then creates or replaces
+  the capture's export in the save folder.
+- Freehand uses perfect-freehand with the macOS stroke options rather than the
+  newer partitioned macOS ink pipeline.
+- Bound arrows from macOS render with their bindings (curved bound arrows clip
+  along the chord); the Linux editor does not create bindings yet.
+- Not yet: per-shape rotation and arrow bend handles, the 3D camera and
+  progressive blur (kept verbatim in sidecars), shape copy/paste and z-order
+  commands, editable editor shortcuts, and applying Default Look to deck cards.
 
 ### Phase 3: Capture extras
 - OCR (Tesseract, empty result never clears the clipboard), color picker, smart

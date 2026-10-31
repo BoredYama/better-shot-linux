@@ -5,13 +5,14 @@ Swift sources in `../Sources` remain the reference implementation; the
 [port plan](../docs/linux-port-plan.md) describes the stack, phases, and
 Wayland constraints.
 
-**Status:** Phase 1, screenshots. You can capture an area, the screen, a window,
-or the previous area, and copy, save, or drag captures from the capture deck.
-The image editor, pinning, OCR, sharing, and recording come in later phases.
+**Status:** Phase 2, screenshots and the image editor. Capture an area, the
+screen, a window, or the previous area; copy, save, drag, or edit captures from
+the capture deck; and annotate and frame them in the editor. Pinning, OCR,
+sharing, and recording come in later phases.
 
 ## Install from source
 
-Requires Rust 1.80 or later, GTK 4.14+, and libadwaita 1.5+ (Ubuntu 24.04,
+Requires Rust 1.92 or later, GTK 4.14+, and libadwaita 1.5+ (Ubuntu 24.04,
 Fedora 40, Debian 13, Arch, or newer). For screenshots you also need
 xdg-desktop-portal with your desktop's backend (GNOME, KDE, or wlr), which
 most desktops install by default.
@@ -41,6 +42,8 @@ Then open BetterShot from your app menu. `make uninstall` removes it.
 | `bettershot capture previous-region` | Capture the last selected area again |
 | `bettershot capture timed-region` | Select an area after a countdown |
 | `bettershot capture region-copy` / `region-save` | Select an area, then only copy or save it |
+| `bettershot edit FILE` | Open an image in the editor (also "Open With" for PNG and JPEG) |
+| `bettershot open-image` | Choose an image to edit |
 | `bettershot bettershot://capture/region` | Run a BetterShot URL |
 | `bettershot quit` | Quit the running instance |
 
@@ -52,9 +55,33 @@ capture, or Escape to cancel. The selector opens with your last area selected,
 so Enter captures it again.
 
 **On a capture card**, Copy puts both the image and a file on the clipboard,
-Save writes it to your save folder, and Dismiss closes it. Drag the card into
-another app to hand over the file, or double-click it to open it. Cards hide
-after a few seconds unless the pointer is over them.
+Save writes it to your save folder, Edit opens the editor, and Dismiss closes
+it. Drag the card into another app to hand over the file, or double-click it to
+edit. Cards hide after a few seconds unless the pointer is over them.
+
+**In the editor**, the toolbar has Select, Rectangle, Solid rectangle, Circle,
+Line, Arrow, Freehand, Numbered circle, Text, Highlight (dims everything outside
+the areas you draw), Pixelate, and Blur, then Crop, Rotate, and Flip. Clicking
+the active tool again returns to Select. The inspector on the left sets the
+style of the tool or selection, and the background: gradients, colors, or an
+image, with padding, corners, shadow, aspect ratio, position, border, and a
+watermark. New captures start with the look from General > Default Look.
+
+- **Save** (Ctrl+S) keeps your edits editable and creates or replaces the
+  capture's file in your save folder, even if you changed nothing.
+- **Copy** (Ctrl+Shift+C) copies the edited image without changing that file.
+- **Export As** writes a new PNG or JPEG anywhere.
+- Closing with unsaved changes asks to Save, Discard, or Cancel.
+
+Tool keys follow macOS: H select, R rectangle, O circle, L line, A arrow,
+1 numbered circle, T text, P pixelate, B blur, C crop. Ctrl+Z and Ctrl+Shift+Z
+undo and redo, Delete or Backspace removes the selection, arrow keys nudge it,
+and Ctrl+= / Ctrl+- / Ctrl+1 / Ctrl+0 zoom. Hold Shift while drawing to keep a
+square or snap a line to 45°. Double-click text to edit it.
+
+Edits are stored beside the capture in the library as a `.bettershot` sidecar
+in the macOS app's format, so they reopen editable; the capture's own pixels
+are never changed.
 
 **Saving:** captures stay private until you save them. New installs save
 region, screen, and window screenshots to `Pictures/Screenshots`
@@ -80,8 +107,16 @@ for example `bettershot capture region`.
   background to move it.
 - **Tray icon.** It uses StatusNotifierItem. KDE, Cinnamon, XFCE, and most
   wlroots bars show it; GNOME needs the AppIndicator extension.
-- **Default Look backgrounds** are not yet applied to new captures; they arrive
-  with the shared renderer in phase 2.
+- **Default Look on captures.** The editor starts new images with your Default
+  Look, but cards and automatic saves still show the plain capture.
+- **Editor gaps.** There is no rotation handle for individual shapes, arrows
+  are not bound to shapes when drawn on Linux, curved arrows have no bend
+  handle, and editor shortcuts cannot be changed yet. Documents from macOS that
+  use these still open and render correctly.
+- **macOS-only effects.** The 3D camera and progressive blur are kept when you
+  save a macOS document on Linux, but not shown.
+- **Fonts.** SF Pro, SF Compact, and SF Rounded become Inter or Cantarell, a
+  condensed sans, and Nunito or Comfortaa, falling back to your default sans.
 - **Multiple monitors with different scale factors** may select slightly off,
   because the portal returns one image for the whole desktop.
 - **Fullscreen** captures every display rather than the one under the pointer.
@@ -91,6 +126,7 @@ for example `bettershot capture region`.
 | Crate | Contents |
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
+| [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas and every export |
 | [`bettershot-platform`](crates/bettershot-platform) | Screenshot and GlobalShortcuts portals, `grim` fallback, tray |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
 
@@ -100,6 +136,7 @@ Each module names the Swift file it ports. Keep the two in step.
 
 | Module | Ports |
 | --- | --- |
+| `annotation` | `Shape.swift`, `AnnotationDocument.swift`, `AnnotationBackground*.swift`, `AnnotationImageTransform.swift`: shapes, the `.bettershot` sidecar, background layout, crop/rotate/flip |
 | `deck` | `DeckStaging.swift`, `ScreenshotFileActions`, and `CaptureOrchestrator`'s staging and after-capture decisions |
 | `history` | `HistoryStore.swift`: the library, `history.json`, and retention |
 | `imaging` | `FrozenScreenFrame.swift`, image encoding, and atomic, collision-free writes |
@@ -115,8 +152,15 @@ Each module names the Swift file it ports. Keep the two in step.
 | `share`, `r2` | Share manifests and links, R2 SigV4 signing and request building |
 | `prefs`, `paths`, `version` | `UserDefaults` stand-in, XDG directories, `version.json` |
 
-Files shared with the macOS app (history, Default Look, share manifests) use the
-same JSON, including Swift's `Codable` shapes for enums and dates.
+Files shared with the macOS app (history, Default Look, editor sidecars, share
+manifests) use the same JSON, including Swift's `Codable` shapes for enums and
+dates.
+
+`bettershot-render` ports `AnnoShapeDrawing.swift`, `ShapeRenderer.swift`,
+the arrow solvers, and `AnnotationBackgroundRenderer.swift`. The canvas and
+exports both draw through `draw_canvas`, so the preview is a reduction of the
+export. Freehand ink uses the perfect-freehand algorithm with the macOS stroke
+options; outlines are close to, but not pixel-identical with, the macOS ink.
 
 ### Linux differences
 
@@ -148,10 +192,16 @@ make check-ui     # drive the real app under Xvfb with a fixture screen
 `make check-ui` needs Xvfb, Openbox, xdotool, ImageMagick, `dbus-run-session`,
 and Python with Pillow. It runs region capture with automatic saving on and
 off, Escape, the card's Save button with Settings open, Capture Previous
-Region, and Hide After, in light and dark appearances. Each step's screenshot
+Region, Hide After, and the editor (drawing shapes and text, a gradient
+background, Save, rotating, the unsaved-changes prompt, reopening, and crop),
+in light and dark appearances. Each step's screenshot
 lands in `target/ui-snapshots/`. It replaces the portal with a fixture image,
 so it cannot check real portals, Wayland compositors, global shortcuts, the
 tray, or window placement; test those on a desktop.
+
+`BETTERSHOT_RENDER_SNAPSHOTS=1 cargo test -p bettershot-render --test showcase`
+writes a render of every shape and background feature to
+`target/render-snapshots/` for review.
 
 Tests run with `BETTERSHOT_TESTING=1`, which keeps every file in a temporary
 folder, and `BETTERSHOT_FAKE_SCREEN` (honored only in testing) substitutes the

@@ -201,7 +201,7 @@ pub fn handle_command_line(
         command_line.arguments().iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
     match cli::parse(&args) {
         Ok(command) => {
-            run(application, command);
+            run(application, command, command_line.cwd());
             glib::ExitCode::SUCCESS
         }
         // `main` rejects bad arguments before contacting the running
@@ -213,12 +213,19 @@ pub fn handle_command_line(
     }
 }
 
-fn run(_application: &adw::Application, command: Command) {
+fn run(_application: &adw::Application, command: Command, cwd: Option<std::path::PathBuf>) {
     let app = App::get();
     match command {
         Command::Activate | Command::Settings => settings::present(&app),
         Command::Background => {}
         Command::Capture(action) => capture::perform(action),
+        Command::Edit(path) => {
+            // A relative path is relative to the invoking process's folder.
+            let path = std::path::PathBuf::from(path);
+            let path = if path.is_absolute() { path } else { cwd.map(|dir| dir.join(&path)).unwrap_or(path) };
+            crate::editor::open(&app, &path);
+        }
+        Command::OpenImage => crate::editor::open_file_dialog(&app),
         Command::Quit => quit_app(),
         // Printed by the launching process before the app starts.
         Command::Help | Command::Version => {}

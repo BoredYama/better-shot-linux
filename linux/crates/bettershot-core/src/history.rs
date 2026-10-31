@@ -171,6 +171,16 @@ impl HistoryStore {
         Ok(true)
     }
 
+    pub fn set_has_annotations(&mut self, id: Uuid, value: bool) -> io::Result<()> {
+        if let Some(record) = self.records.iter_mut().find(|r| r.id == id) {
+            if record.has_annotations != value {
+                record.has_annotations = value;
+                self.save()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_share_url(&mut self, id: Uuid, url: Option<String>) -> io::Result<()> {
         if let Some(record) = self.records.iter_mut().find(|r| r.id == id) {
             record.share_url = url;

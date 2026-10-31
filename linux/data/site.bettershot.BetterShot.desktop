@@ -9,7 +9,7 @@ Terminal=false
 StartupNotify=true
 Categories=Graphics;2DGraphics;RasterGraphics;
 Keywords=screenshot;capture;screen;snip;
-MimeType=x-scheme-handler/bettershot;
+MimeType=x-scheme-handler/bettershot;image/png;image/jpeg;
 Actions=capture-region;capture-screen;capture-window;capture-previous-region;settings;
 
 [Desktop Action capture-region]

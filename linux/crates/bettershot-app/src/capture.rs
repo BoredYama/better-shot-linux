@@ -259,7 +259,8 @@ pub fn process(app: &App, raw: &Path, action: Action) {
     match processed.follow_up {
         FollowUp::ShowSaveFailure => card.show_save_failure(),
         FollowUp::Save => card.save(),
-        // The editor and pinning arrive in later phases; the card stays.
-        FollowUp::Edit | FollowUp::Pin | FollowUp::None => {}
+        FollowUp::Edit => card.edit(),
+        // Pinning arrives in a later phase; the card stays.
+        FollowUp::Pin | FollowUp::None => {}
     }
 }

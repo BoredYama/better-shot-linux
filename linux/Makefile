@@ -47,6 +47,9 @@ install: release ## Install to $(PREFIX) (default /usr/local)
 		install -Dm644 data/icons/hicolor/$${size}x$${size}/apps/$(APP_ID).png \
 			$(DESTDIR)$(PREFIX)/share/icons/hicolor/$${size}x$${size}/apps/$(APP_ID).png; \
 	done
+	for icon in data/icons/hicolor/scalable/actions/*.svg; do \
+		install -Dm644 "$$icon" $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/$$(basename "$$icon"); \
+	done
 	@# Packagers (DESTDIR set) leave cache updates to the package manager.
 	if [ -z "$(DESTDIR)" ]; then \
 		gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor || true; \
@@ -58,4 +61,5 @@ uninstall: ## Remove an installation from $(PREFIX)
 	rm -f $(DESTDIR)$(PREFIX)/share/applications/$(APP_ID).desktop
 	rm -f $(DESTDIR)$(PREFIX)/share/metainfo/$(APP_ID).metainfo.xml
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/*/apps/$(APP_ID).png
+	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/bettershot-*-symbolic.svg
 	-update-desktop-database -q $(DESTDIR)$(PREFIX)/share/applications

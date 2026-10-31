@@ -1,6 +1,6 @@
 # BetterShot for Linux: port plan
 
-Status: proposal, nothing implemented yet.
+Status: Phase 0 complete (core crate, CI). Phase 1 is next.
 
 ## What is being ported
 
@@ -135,7 +135,7 @@ Targets: GNOME and KDE Plasma on Wayland first, then X11 and wlroots compositors
 
 Each phase ends usable, with tests, and is committed and pushed separately.
 
-### Phase 0: Foundation
+### Phase 0: Foundation (done)
 - Cargo workspace, CI (GitHub Actions on Ubuntu: `cargo fmt`, `clippy`, tests,
   release build), `make`-style targets in `linux/Makefile`.
 - `bettershot-core`: preferences, `BackgroundStyle`/`GradientPreset`, capture
@@ -143,6 +143,19 @@ Each phase ends usable, with tests, and is committed and pushed separately.
   persisted IDs), share manifest and slug, `version.json` reading.
 - Port standalone checks: file naming, URL actions, region geometry, overlay
   layout, release notes parsing, R2 endpoint/SigV4, onboarding state.
+
+Delivered in `linux/crates/bettershot-core` (see `linux/README.md`). Decisions
+made along the way:
+
+- Global shortcut defaults map ⌘ to Super (`⌘⇧4` → Super+Shift+4); editor
+  shortcuts map ⌘ to Ctrl. Keys are stored as GDK key names.
+- Region geometry uses a top-left origin. The macOS `screencapture` argument
+  and point-space flip were not ported.
+- Rendered file names are also capped at 230 UTF-8 bytes for Linux file systems.
+- Preferences are a JSON file with the macOS `bs_*` keys, so ported migrations
+  read the same. Settings are not shared with macOS; history, Default Look,
+  and share manifests use the same JSON as the macOS app.
+- Application ID: `site.bettershot.BetterShot`.
 
 ### Phase 1: Screenshot MVP
 - Single-instance GTK application with D-Bus actions and the `bettershot` CLI.

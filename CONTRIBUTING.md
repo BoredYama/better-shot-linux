@@ -113,6 +113,15 @@ directory. Follow the website rules in [AGENTS.md](AGENTS.md), including use of
 existing Tailwind tokens, `cn`, and installed Radix components. Website-only
 changes do not need README or changelog edits unless explicitly requested.
 
+### Linux port
+
+[linux/](linux/) is a Rust port of the app to Linux, in progress. It does not
+build with Xcode and needs no macOS tools. Run `make -C linux check` before
+submitting changes there; see [linux/README.md](linux/README.md) and the
+[port plan](docs/linux-port-plan.md). When you change behavior that a
+`bettershot-core` module ports, such as file naming or share links, update the
+module named in its header comment too.
+
 ## Code map
 
 | Location | Start here for |

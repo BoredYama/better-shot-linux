@@ -43,3 +43,6 @@ scripts/
 # Claude Code local worktrees (shared CLAUDE.md is tracked)
 .claude/worktrees/
 .build-release/
+
+# Linux port (Cargo)
+/linux/target/

@@ -1,0 +1,63 @@
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "linux/**"
+      - "version.json"
+      - "CHANGELOG.md"
+      - ".github/workflows/linux.yml"
+  pull_request:
+    paths:
+      - "linux/**"
+      - "version.json"
+      - "CHANGELOG.md"
+      - ".github/workflows/linux.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: linux
+
+jobs:
+  check:
+    name: Format, lint, and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+      BETTERSHOT_TESTING: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            linux/target
+          key: linux-${{ runner.os }}-${{ hashFiles('linux/Cargo.lock') }}
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Release build
+        run: cargo build --workspace --release --locked

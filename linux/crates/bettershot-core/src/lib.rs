@@ -1,0 +1,24 @@
+//! Platform-independent BetterShot logic for the Linux port.
+//!
+//! Everything here is a port of the macOS app's Swift sources, kept free of GTK
+//! and other GUI dependencies so it can be tested headlessly. Each module names
+//! the Swift file it follows; when behavior changes in one, change the other.
+
+pub mod background;
+pub mod capture_record;
+pub mod file_naming;
+pub mod geometry;
+pub mod onboarding;
+pub mod overlay_layout;
+pub mod paths;
+pub mod prefs;
+pub mod r2;
+pub mod region;
+pub mod release_notes;
+pub mod share;
+pub mod shortcuts;
+pub mod swift_date;
+pub mod url_action;
+pub mod version;
+
+pub use prefs::Preferences;

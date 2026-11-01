@@ -305,8 +305,15 @@ model.
   (x264), `gstreamer1.0-vaapi`, or the OpenH264 plugin.
 - **Recording fails on an X11 session without a ScreenCast portal:** the
   fallback is GStreamer's `ximagesrc`, in `gstreamer1.0-x` on Debian.
-- **No tray icon on GNOME:** install the AppIndicator extension; the tray
-  uses StatusNotifierItem.
+- **No tray icon on GNOME:** GNOME shows tray icons only through the
+  AppIndicator extension. Ubuntu ships it as Ubuntu AppIndicators; turn it
+  on in the Extensions app, or check it with the command below. Settings ›
+  General › Show tray icon says when no tray host is running, and the icon
+  appears as soon as one starts, without restarting BetterShot.
+
+  ```bash
+  gnome-extensions list --enabled | grep -i appindicator
+  ```
 - **No notifications on GNOME** (errors, "No text found"): GNOME shows an
   app's notifications only when its desktop entry is installed, so run
   `make install` (or install a package) rather than the binary from
@@ -584,7 +591,10 @@ for example `bettershot capture region`.
   so the capture deck opens wherever your desktop places it. Drag it by its
   background to move it.
 - **Tray icon.** It uses StatusNotifierItem. KDE, Cinnamon, XFCE, and most
-  wlroots bars show it; GNOME needs the AppIndicator extension.
+  wlroots bars show it; GNOME needs the AppIndicator extension. GNOME's
+  extension cannot right-align shortcuts, so its menu shows each one after
+  a dot (`Capture Region · Super+Shift+4`); other hosts draw them in their
+  own accelerator column.
 - **Default Look on captures.** The editor starts new images with your Default
   Look, but cards and automatic saves still show the plain capture.
 - **Editor gaps.** There is no rotation handle for individual shapes, arrows

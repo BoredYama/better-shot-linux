@@ -384,6 +384,69 @@ impl Shortcut {
     }
 }
 
+impl Shortcut {
+    /// The chord as a dbusmenu item's `shortcut` property lists it, e.g.
+    /// `["Super", "Shift", "4"]`, so tray hosts that render accelerators
+    /// can right-align it themselves.
+    pub fn dbusmenu_keys(&self) -> Vec<String> {
+        if !self.enabled || self.key.is_empty() {
+            return Vec::new();
+        }
+        let mut keys: Vec<String> = [
+            (Modifiers::SUPER, "Super"),
+            (Modifiers::CONTROL, "Control"),
+            (Modifiers::ALT, "Alt"),
+            (Modifiers::SHIFT, "Shift"),
+        ]
+        .into_iter()
+        .filter(|(flag, _)| self.modifiers.contains(*flag))
+        .map(|(_, name)| name.to_owned())
+        .collect();
+        keys.push(key_label(&self.key));
+        keys
+    }
+}
+
+/// Reads a desktop's description of a bound global shortcut. GNOME's portal
+/// answers with a translated sentence around a raw GTK accelerator
+/// (`Press <shift><super>4`, or `Press <ctrl>x or <alt>y`); KDE with a
+/// readable chord (`Meta+Shift+4`). The first chord listed wins.
+pub fn parse_trigger(description: &str) -> Option<Shortcut> {
+    let words: Vec<&str> = description.split_whitespace().collect();
+    let chord = words
+        .iter()
+        .find(|word| word.contains('<') || (word.len() > 1 && word.contains('+')))
+        .or_else(|| words.last())?;
+    // `Ctrl++` is the plus key, which splitting on `+` would lose.
+    let (chord, plus_key) = match chord.strip_suffix("++") {
+        Some(rest) => (rest, true),
+        None => (*chord, false),
+    };
+    let mut pieces: Vec<&str> = chord.split(['<', '>', '+']).filter(|piece| !piece.is_empty()).collect();
+    let key = if plus_key { "plus".to_owned() } else { pieces.pop()?.to_owned() };
+    let mut modifiers = Modifiers::NONE;
+    for piece in pieces {
+        modifiers = modifiers
+            | match piece.to_ascii_lowercase().as_str() {
+                "shift" => Modifiers::SHIFT,
+                "ctrl" | "control" | "primary" => Modifiers::CONTROL,
+                "alt" | "mod1" => Modifiers::ALT,
+                "super" | "logo" | "meta" | "mod4" | "hyper" => Modifiers::SUPER,
+                _ => return None,
+            };
+    }
+    Some(Shortcut::new(&key, modifiers))
+}
+
+/// A compact label for a desktop's trigger description, e.g. `Super+Shift+4`
+/// for `Press <shift><super>4`. Text it cannot read is shown as given.
+pub fn trigger_label(description: &str) -> String {
+    parse_trigger(description)
+        .map(|shortcut| shortcut.label())
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| description.trim().to_owned())
+}
+
 /// Single letters are case-insensitive; everything else keeps its GDK name.
 pub fn normalized_key(key: &str) -> String {
     let mut chars = key.chars();
@@ -497,6 +560,24 @@ pub fn validation_error(prefs: &Preferences, shortcut: &Shortcut, action: Action
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_trigger_descriptions_become_compact_labels() {
+        assert_eq!(trigger_label("Press <shift><super>4"), "Super+Shift+4");
+        assert_eq!(trigger_label("Drücken Sie <Shift><Super>4"), "Super+Shift+4", "the sentence is translated");
+        assert_eq!(trigger_label("Press <ctrl>x or <alt>y"), "Ctrl+X", "the first chord wins");
+        assert_eq!(trigger_label("Meta+Shift+4"), "Super+Shift+4", "KDE's readable chords");
+        assert_eq!(trigger_label("Press <primary>plus"), "Ctrl++");
+        assert_eq!(trigger_label("Ctrl++"), "Ctrl++");
+        assert_eq!(trigger_label("Press Print"), "Print");
+        assert_eq!(trigger_label("Press <hyper2>x"), "Press <hyper2>x", "unknown modifiers are shown as given");
+        assert_eq!(parse_trigger(""), None);
+        let shortcut = parse_trigger("Press <shift><super>4").unwrap();
+        assert_eq!(shortcut, Shortcut::new("4", Modifiers::SUPER | Modifiers::SHIFT));
+        assert_eq!(shortcut.dbusmenu_keys(), ["Super", "Shift", "4"]);
+        assert!(Shortcut::cleared().dbusmenu_keys().is_empty());
+    }
+
     use std::collections::HashSet;
 
     #[test]

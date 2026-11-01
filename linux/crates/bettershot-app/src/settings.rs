@@ -265,9 +265,15 @@ fn general_page(app: &App, window: &adw::PreferencesWindow) -> adw::PreferencesP
             app.apply_appearance();
         },
     ));
+    // Say so when no tray host is running, the usual reason the icon is missing.
+    let host_missing = app.state().tray.as_ref().is_some_and(|tray| !tray.host_available());
     appearance.add(&switch_row(
         "Show tray icon",
-        "On GNOME, tray icons need the AppIndicator extension.",
+        if host_missing {
+            "No tray host is running, so the icon can’t appear. On GNOME, turn on the AppIndicator extension (Ubuntu AppIndicators) in the Extensions app."
+        } else {
+            "On GNOME, tray icons need the AppIndicator extension."
+        },
         app.with_prefs(|p| p.show_tray_icon()),
         |active| {
             let app = App::get();

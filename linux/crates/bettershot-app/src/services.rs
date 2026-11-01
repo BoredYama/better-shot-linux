@@ -43,13 +43,28 @@ pub fn start(app: &App) {
     start_global_shortcuts(app);
 }
 
-/// The label for an action's shortcut: what the desktop bound, else the default.
+/// The label for an action's shortcut: what the desktop bound, else the
+/// default. A desktop's own wording (GNOME says `Press <shift><super>4`) is
+/// rewritten as a compact chord, e.g. `Super+Shift+4`.
 pub fn shortcut_label(app: &App, action: Action) -> Option<String> {
     let state = app.state();
     if let ShortcutStatus::Bound(bound) = &state.shortcut_status {
-        return bound.iter().find(|b| b.action == action).map(|b| b.trigger.clone()).filter(|t| !t.is_empty());
+        return bound
+            .iter()
+            .find(|b| b.action == action)
+            .map(|b| shortcuts::trigger_label(&b.trigger))
+            .filter(|t| !t.is_empty());
     }
     shortcuts::effective(&state.prefs, action).map(|s| s.label())
+}
+
+/// The chord bound to an action, for tray hosts that draw accelerators.
+fn shortcut_keys(app: &App, action: Action) -> Option<shortcuts::Shortcut> {
+    let state = app.state();
+    if let ShortcutStatus::Bound(bound) = &state.shortcut_status {
+        return bound.iter().find(|b| b.action == action).and_then(|b| shortcuts::parse_trigger(&b.trigger));
+    }
+    shortcuts::effective(&state.prefs, action)
 }
 
 fn tray_entries(app: &App) -> Vec<TrayEntry> {
@@ -58,6 +73,7 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         icon,
         command: TrayCommand::Capture(action),
         shortcut: shortcut_label(app, action),
+        shortcut_keys: shortcut_keys(app, action),
     };
     let mut entries = Vec::new();
     if crate::recording::is_active() {
@@ -84,24 +100,28 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
             icon: "folder-pictures-symbolic",
             command: TrayCommand::OpenGallery,
             shortcut: None,
+            shortcut_keys: None,
         },
         TrayEntry {
             label: "Open Image…".into(),
             icon: "document-open-symbolic",
             command: TrayCommand::OpenImage,
             shortcut: None,
+            shortcut_keys: None,
         },
         TrayEntry {
             label: "Settings…".into(),
             icon: "preferences-system-symbolic",
             command: TrayCommand::OpenSettings,
             shortcut: None,
+            shortcut_keys: None,
         },
         TrayEntry {
             label: "Quit BetterShot".into(),
             icon: "application-exit-symbolic",
             command: TrayCommand::Quit,
             shortcut: None,
+            shortcut_keys: None,
         },
     ]);
     entries

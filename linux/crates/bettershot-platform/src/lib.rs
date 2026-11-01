@@ -4,7 +4,9 @@
 //! D-Bus I/O uses zbus's own `async-io` thread, so no tokio runtime is needed.
 
 pub mod global_shortcuts;
+pub mod r2_client;
 pub mod screenshot;
+pub mod secrets;
 pub mod tray;
 
 pub use ashpd::WindowIdentifier;

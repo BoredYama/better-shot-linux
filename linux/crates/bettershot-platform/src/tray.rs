@@ -12,6 +12,7 @@ use ksni::menu::{MenuItem, StandardItem};
 pub enum TrayCommand {
     Capture(Action),
     OpenImage,
+    OpenGallery,
     OpenSettings,
     Quit,
 }
@@ -65,7 +66,14 @@ impl ksni::Tray for BetterShotTray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let mut items: Vec<MenuItem<Self>> = Vec::new();
         for (index, entry) in self.entries.iter().enumerate() {
-            if index > 0 && matches!(entry.command, TrayCommand::OpenSettings) {
+            // Captures, then the library and image tools, then Settings and Quit.
+            let previous = index.checked_sub(1).map(|i| self.entries[i].command);
+            let starts_group = match previous {
+                Some(TrayCommand::Capture(_)) => !matches!(entry.command, TrayCommand::Capture(_)),
+                Some(_) => matches!(entry.command, TrayCommand::OpenSettings),
+                None => false,
+            };
+            if starts_group {
                 items.push(MenuItem::Separator);
             }
             let label = match &entry.shortcut {

@@ -100,6 +100,92 @@ pub fn mark_seen(current: &str, prefs: &mut Preferences) -> io::Result<()> {
     prefs.set(SEEN_VERSION_KEY, current)
 }
 
+/// Where relative links in the changelog point (`ReleaseNotesView`'s base URL).
+pub const LINK_BASE: &str = "https://github.com/KartikLabhshetwar/better-shot/blob/main/";
+pub const ALL_NOTES_URL: &str = "https://github.com/KartikLabhshetwar/better-shot/blob/main/CHANGELOG.md";
+
+/// A block of release notes, ready for display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Block {
+    Heading(String),
+    /// Pango markup: bold, code, and links from the inline Markdown.
+    Paragraph(String),
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Inline Markdown (`**bold**`, `` `code` ``, `[text](url)`) as Pango markup.
+pub fn inline_markup(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    let mut bold = false;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("**") {
+            out.push_str(if bold { "</b>" } else { "<b>" });
+            bold = !bold;
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix('`') {
+            match after.find('`') {
+                Some(end) => {
+                    out.push_str(&format!("<tt>{}</tt>", escape(&after[..end])));
+                    rest = &after[end + 1..];
+                }
+                None => {
+                    out.push('`');
+                    rest = after;
+                }
+            }
+        } else if let Some(after) = rest.strip_prefix('[') {
+            let link = after.find("](").and_then(|mid| {
+                let close = after[mid + 2..].find(')')? + mid + 2;
+                Some((&after[..mid], &after[mid + 2..close], close))
+            });
+            match link {
+                Some((label, url, close)) if !label.contains('[') => {
+                    let url = if url.contains("://") { url.to_owned() } else { format!("{LINK_BASE}{url}") };
+                    out.push_str(&format!("<a href=\"{}\">{}</a>", escape(&url), inline_markup(label)));
+                    rest = &after[close + 1..];
+                }
+                _ => {
+                    out.push('[');
+                    rest = after;
+                }
+            }
+        } else {
+            let next = rest
+                .find(['*', '`', '['])
+                .filter(|&i| i > 0)
+                .unwrap_or_else(|| rest.char_indices().nth(1).map_or(rest.len(), |(i, _)| i));
+            out.push_str(&escape(&rest[..next]));
+            rest = &rest[next..];
+        }
+    }
+    if bold {
+        out.push_str("</b>");
+    }
+    out
+}
+
+/// A release body as headings and paragraphs; list items become their own
+/// paragraphs with a bullet, as `ReleaseNotesView` splits them.
+pub fn blocks(body: &str) -> Vec<Block> {
+    body.replace("\n- ", "\n\n- ")
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|paragraph| match paragraph.strip_prefix("### ") {
+            Some(heading) => Block::Heading(heading.to_owned()),
+            None => {
+                let text =
+                    paragraph.strip_prefix("- ").map_or_else(|| paragraph.to_owned(), |item| format!("• {item}"));
+                Block::Paragraph(inline_markup(&text.replace('\n', " ")))
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +237,26 @@ mod tests {
             bundled.iter().any(|n| n.version == version::APP_VERSION.version),
             "the app version must have release notes"
         );
+    }
+
+    #[test]
+    fn notes_become_headings_and_pango_markup() {
+        let blocks = blocks(
+            "### Added\n\n- **Bold** and `code` & <tags>\n- See [#12](https://x.example/12) or [docs](docs/a.md).",
+        );
+        assert_eq!(blocks[0], Block::Heading("Added".into()));
+        assert_eq!(blocks[1], Block::Paragraph("• <b>Bold</b> and <tt>code</tt> &amp; &lt;tags&gt;".into()));
+        assert_eq!(
+            blocks[2],
+            Block::Paragraph(format!(
+                "• See <a href=\"https://x.example/12\">#12</a> or <a href=\"{LINK_BASE}docs/a.md\">docs</a>."
+            ))
+        );
+        assert_eq!(inline_markup("a [b c"), "a [b c");
+        assert_eq!(inline_markup("**open"), "<b>open</b>");
+        // Every bundled release renders.
+        for release in parse(BUNDLED_CHANGELOG) {
+            assert!(!super::blocks(&release.body).is_empty(), "{}", release.version);
+        }
     }
 }

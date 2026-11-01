@@ -1,19 +1,21 @@
-//! The capture deck: one card per capture with Copy, Save, and Dismiss, drag
-//! to another app, and Hide After. A port of the screenshot parts of
-//! `Sources/Preview/PreviewOverlay.swift`.
-//!
-//! Pin and Share arrive with pinned images (phase 3) and cloud sharing
-//! (phase 4); until then their slots stay empty.
+//! The capture deck: one card per capture with Copy, Save, Edit, Pin, Share,
+//! and Dismiss, drag to another app, and Hide After. A port of the screenshot
+//! parts of `Sources/Preview/PreviewOverlay.swift`. Share uploads to R2 and
+//! shows its progress, link, or failure under the card.
 //!
 //! Wayland does not let apps place their own windows, so the deck is a small
 //! window the desktop positions. It can be moved by dragging its background.
 
 use crate::app::App;
-use crate::clipboard;
+use crate::transfer_card::TransferCard;
+use crate::{clipboard, sharing};
 use adw::prelude::*;
 use bettershot_core::app_prefs::AppPreferences;
+use bettershot_core::deck;
 use bettershot_core::deck::{Pipeline, ProcessedCapture};
 use bettershot_core::overlay_layout::{OverlayTool, OverlayToolSlot};
+use bettershot_core::transfer::{Stage, TransferStatus};
+use bettershot_platform::r2_client::UploadError;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -41,6 +43,10 @@ struct CardInner {
     timer: RefCell<Option<glib::SourceId>>,
     hovered: Cell<bool>,
     removed: Cell<bool>,
+    transfer: TransferCard,
+    share_status: RefCell<Option<TransferStatus>>,
+    upload: RefCell<Option<Rc<sharing::Upload>>>,
+    status_timer: RefCell<Option<glib::SourceId>>,
 }
 
 /// Adds a card for a processed capture and shows the deck.
@@ -55,6 +61,35 @@ pub fn show(app: &App, processed: &ProcessedCapture) -> Card {
     });
     card.schedule_hide(app);
     card
+}
+
+/// Shows a card for a file already in the library or save folder (Gallery
+/// Open). It stays until dismissed.
+pub fn show_existing(app: &App, path: &Path) {
+    let processed = ProcessedCapture {
+        display: path.to_path_buf(),
+        thumbnail: bettershot_core::imaging::load_rgba(path).ok().map(|image| {
+            let edge = app.with_prefs(|p| {
+                let (w, h) = p.overlay_card_size().thumbnail_size();
+                (w.max(h) * 2) as u32
+            });
+            bettershot_core::imaging::thumbnail(&image, edge)
+        }),
+        copy: false,
+        follow_up: deck::FollowUp::None,
+        saved: false,
+        staging_error: None,
+    };
+    let card = show(app, &processed);
+    card.cancel_timer();
+}
+
+/// Removes cards showing `path`, after its files were moved to the trash.
+pub fn forget(path: &Path) {
+    let cards = DECK.with(|deck| deck.borrow().as_ref().map(|d| d.cards.clone()).unwrap_or_default());
+    for card in cards.into_iter().filter(|card| card.display() == path) {
+        card.dismiss();
+    }
 }
 
 fn build_deck() -> Deck {
@@ -110,7 +145,15 @@ fn slot_alignment(slot: OverlayToolSlot) -> (gtk::Align, gtk::Align) {
 
 /// Tools that work in this phase.
 fn is_available(tool: OverlayTool) -> bool {
-    matches!(tool, OverlayTool::Copy | OverlayTool::Save | OverlayTool::Dismiss | OverlayTool::Edit | OverlayTool::Pin)
+    matches!(
+        tool,
+        OverlayTool::Copy
+            | OverlayTool::Save
+            | OverlayTool::Dismiss
+            | OverlayTool::Edit
+            | OverlayTool::Pin
+            | OverlayTool::Share
+    )
 }
 
 impl Card {
@@ -157,9 +200,11 @@ impl Card {
         footer.append(&retry);
         status.set_hexpand(true);
 
+        let transfer = TransferCard::new(true);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
         root.append(&overlay);
         root.append(&footer);
+        root.append(&transfer.root);
         root.set_width_request(width);
 
         let card = Card(Rc::new(CardInner {
@@ -170,7 +215,23 @@ impl Card {
             timer: RefCell::new(None),
             hovered: Cell::new(false),
             removed: Cell::new(false),
+            transfer,
+            share_status: RefCell::new(None),
+            upload: RefCell::new(None),
+            status_timer: RefCell::new(None),
         }));
+        let connect = |f: fn(&Card)| {
+            let weak = Rc::downgrade(&card.0);
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    f(&Card(inner));
+                }
+            }
+        };
+        card.0.transfer.connect_cancel(connect(Card::cancel_share));
+        card.0.transfer.connect_dismiss(connect(Card::dismiss_share_status));
+        card.0.transfer.connect_retry(connect(Card::share));
+        card.0.transfer.connect_settings(|| crate::settings::present_sharing(&App::get()));
 
         for slot in OverlayToolSlot::ALL {
             let Some(tool) = layout.tool(slot).filter(|tool| is_available(*tool)) else { continue };
@@ -193,7 +254,7 @@ impl Card {
                     OverlayTool::Dismiss => card.dismiss(),
                     OverlayTool::Edit => card.edit(),
                     OverlayTool::Pin => card.pin(),
-                    OverlayTool::Share => {}
+                    OverlayTool::Share => card.share(),
                 }
             });
             overlay.add_overlay(&button);
@@ -318,6 +379,120 @@ impl Card {
         }
     }
 
+    fn set_share_status(&self, status: Option<TransferStatus>) {
+        if let Some(id) = self.0.status_timer.borrow_mut().take() {
+            id.remove();
+        }
+        self.0.transfer.set_status(status.as_ref());
+        // A copied link stays a while, then the card resumes Hide After.
+        if let Some(delay) = status.as_ref().and_then(TransferStatus::auto_dismiss) {
+            let weak = Rc::downgrade(&self.0);
+            let id = glib::timeout_add_local_once(delay, move || {
+                if let Some(inner) = weak.upgrade() {
+                    inner.status_timer.borrow_mut().take();
+                    Card(inner).dismiss_share_status();
+                }
+            });
+            *self.0.status_timer.borrow_mut() = Some(id);
+        }
+        *self.0.share_status.borrow_mut() = status;
+    }
+
+    /// Port of `PreviewOverlay.share`: keeps the capture in the library,
+    /// uploads it, saves the link with its record, and copies it.
+    pub fn share(&self) {
+        if self.0.upload.borrow().is_some() {
+            return;
+        }
+        self.cancel_timer();
+        let app = App::get();
+        if let Some(blocked) = sharing::blocker(&app) {
+            self.set_share_status(Some(blocked));
+            return;
+        }
+        let display = self.display();
+        let retained = {
+            let mut state = app.state_mut();
+            let state = &mut *state;
+            state.deck.retain(&display, &mut state.history)
+        };
+        if app.state().deck.is_staged(&retained) {
+            self.set_share_status(Some(TransferStatus::failed(
+                "Couldn’t prepare capture",
+                "The screenshot is still in the deck. Check available disk space and retry.",
+            )));
+            return;
+        }
+        let (record_id, name) = {
+            let state = app.state();
+            (state.history.record_matching(&retained).map(|r| r.id), deck::capture_name(&retained, &state.history))
+        };
+        let upload = match sharing::start(&app, &retained, &name, None) {
+            Ok(upload) => Rc::new(upload),
+            Err(status) => {
+                self.set_share_status(Some(status));
+                return;
+            }
+        };
+        self.set_share_status(Some(TransferStatus::Working { stage: Stage::Processing, progress: None }));
+        *self.0.upload.borrow_mut() = Some(upload.clone());
+        let weak = Rc::downgrade(&self.0);
+        glib::spawn_future_local(async move {
+            while let Ok(event) = upload.events.recv().await {
+                let Some(inner) = weak.upgrade() else { return };
+                let card = Card(inner);
+                let current = card.0.upload.borrow().as_ref().is_some_and(|u| Rc::ptr_eq(u, &upload));
+                if !current {
+                    return;
+                }
+                match event {
+                    sharing::Event::Progress(fraction) => card.set_share_status(Some(TransferStatus::Working {
+                        stage: Stage::Uploading,
+                        progress: Some(fraction),
+                    })),
+                    sharing::Event::Done(result) => {
+                        card.0.upload.borrow_mut().take();
+                        match result {
+                            Ok(uploaded) => {
+                                let app = App::get();
+                                if let Some(id) = record_id {
+                                    if let Err(error) =
+                                        app.state_mut().history.set_share_url(id, Some(uploaded.link.clone()))
+                                    {
+                                        eprintln!(
+                                            "bettershot: the share link could not be saved to the library: {error}"
+                                        );
+                                    }
+                                }
+                                let _ = clipboard::copy_text(&uploaded.link);
+                                card.set_share_status(Some(TransferStatus::LinkReady { url: uploaded.link }));
+                                crate::gallery::reload();
+                            }
+                            Err(UploadError::Cancelled) => card.set_share_status(None),
+                            Err(UploadError::Failed(message)) => {
+                                card.set_share_status(Some(TransferStatus::failed("Upload failed", &message)))
+                            }
+                        }
+                        card.schedule_hide(&App::get());
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    fn cancel_share(&self) {
+        if let Some(upload) = self.0.upload.borrow_mut().take() {
+            upload.cancel();
+        }
+        self.dismiss_share_status();
+    }
+
+    fn dismiss_share_status(&self) {
+        self.set_share_status(None);
+        self.schedule_hide(&App::get());
+    }
+
     pub fn copy(&self) {
         let app = App::get();
         match clipboard::copy_capture(&app, &self.display()) {
@@ -374,7 +549,9 @@ impl Card {
         self.cancel_timer();
         let (dismisses, delay) =
             app.with_prefs(|p: &AppPreferences| (p.overlay_dismisses(), p.overlay_dismiss_delay()));
-        let protected = app.state().deck.is_staged(&self.display()) || self.0.retry.is_visible();
+        let protected = app.state().deck.is_staged(&self.display())
+            || self.0.retry.is_visible()
+            || self.0.share_status.borrow().is_some();
         if !dismisses || protected {
             return;
         }
@@ -412,6 +589,9 @@ impl Card {
             return;
         }
         self.cancel_timer();
+        if let Some(upload) = self.0.upload.borrow_mut().take() {
+            upload.cancel();
+        }
         let app = App::get();
         app.state_mut().deck.discard(&self.display());
         DECK.with(|deck| {

@@ -38,6 +38,8 @@ pub struct Editor {
     pub widgets: RefCell<Option<window::Widgets>>,
     /// The last coalesced edit (inspector sliders), so one drag is one undo.
     last_edit: RefCell<Option<(String, Instant)>>,
+    /// The running Share upload, if any.
+    pub share_upload: RefCell<Option<std::rc::Rc<crate::sharing::Upload>>>,
 }
 
 impl Editor {
@@ -49,6 +51,7 @@ impl Editor {
             interaction: RefCell::new(canvas::Interaction::default()),
             widgets: RefCell::new(None),
             last_edit: RefCell::new(None),
+            share_upload: RefCell::new(None),
         }
     }
 

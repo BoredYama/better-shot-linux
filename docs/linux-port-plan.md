@@ -1,7 +1,7 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0–3 complete (core, CI, screenshot app, image editor, capture
-extras). Phase 4 is next.
+Status: Phases 0–4 complete (core, CI, screenshot app, image editor, capture
+extras, sharing and library). Phase 5 is next.
 
 ## What is being ported
 
@@ -242,12 +242,32 @@ Decisions made while building it:
 - Not yet: video pins (with recording) and the macOS scroll preferences
   (`scrollMaxHeight`, frozen-header detection), which use their defaults.
 
-### Phase 4: Sharing and library
+### Phase 4: Sharing and library (done)
 - R2 credentials in Secret Service, SigV4 uploads, share manifests and posters,
   saved share links. Uses `TransferStatusCard`-equivalent progress toasts.
 - Media Gallery with local/cloud state, sorting, deletion confirmations.
 - Onboarding (Welcome, Permissions, Saving, Practice) and release notes from the
   bundled `CHANGELOG.md`.
+
+Decisions made while building it:
+
+- Keys are stored through `oo7` (Secret Service on the host, the Secret portal
+  in a Flatpak) under the macOS Keychain service name; bucket settings keep
+  the macOS `bs_r2_*` preference keys. Tests use a fixture key file and a fake
+  bucket (`BETTERSHOT_R2_ENDPOINT`, honored only in testing).
+- HTTP is `ureq` with rustls and the platform's certificate store. R2 needs a
+  Content-Length, so each object is sent as one sized buffer and progress
+  advances per object rather than per byte.
+- The Linux library is the single `HistoryStore`; a share link is stored on
+  its capture record (`shareURL`, the Swift key). Phase 4 found that earlier
+  Linux builds wrote `shareUrl`; both are read.
+- Gallery Open shows the capture as a deck card, as macOS does. Deleting a
+  cloud share also accepts direct links, which macOS could not delete.
+- Onboarding's Permissions step checks the screenshot portal and global
+  shortcut registration, since Linux has no Screen Recording or Accessibility
+  permission. The practice image installs to `share/bettershot/onboarding`.
+- Release notes come from the macOS changelog and say so. Whether Linux gets
+  its own changelog is an open question.
 
 ### Phase 5: Screen recording
 - Display/window/area recording via ScreenCast + GStreamer, system audio

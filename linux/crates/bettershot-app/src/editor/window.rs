@@ -8,7 +8,8 @@
 use super::model::EditorModel;
 use super::{canvas, inspector, smart_redaction, Editor};
 use crate::app::App;
-use crate::{clipboard, deck_ui};
+use crate::transfer_card::TransferCard;
+use crate::{clipboard, deck_ui, sharing};
 use adw::prelude::*;
 use bettershot_core::annotation::background::settings_from_default_look;
 use bettershot_core::annotation::document::AnnotationDocument;
@@ -20,6 +21,8 @@ use bettershot_core::deck::{self, SaveTarget};
 use bettershot_core::geometry::Rect;
 use bettershot_core::imaging::{self, EncodeOptions};
 use bettershot_core::shortcuts::{self, Action, Modifiers, Scope};
+use bettershot_core::transfer::{Stage, TransferStatus};
+use bettershot_platform::r2_client::UploadError;
 use bettershot_render::{render, Scene};
 use gtk::{gdk, gio, glib};
 use image::RgbaImage;
@@ -42,6 +45,8 @@ pub struct Widgets {
     crop_bar: gtk::Revealer,
     zoom: gtk::Button,
     toasts: adw::ToastOverlay,
+    transfer: TransferCard,
+    transfer_timer: RefCell<Option<glib::SourceId>>,
     pub inspector: inspector::Inspector,
     canvas_keys: gtk::EventControllerKey,
     im: gtk::IMMulticontext,
@@ -177,8 +182,10 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
     save.set_tooltip_text(Some(&with_shortcut(app, "Save edits and update the saved file", Action::ImageSave)));
     let export = icon_button("document-save-as-symbolic", "Export As…".into());
     let copy = icon_button("edit-copy-symbolic", with_shortcut(app, "Copy", Action::ImageCopy));
+    let share = icon_button("bettershot-share-symbolic", with_shortcut(app, "Share to Cloud", Action::ImageShare));
     header.pack_end(&save);
     header.pack_end(&export);
+    header.pack_end(&share);
     header.pack_end(&copy);
 
     // Tools, then image transforms and crop.
@@ -272,6 +279,25 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
     let canvas_overlay = gtk::Overlay::new();
     canvas_overlay.set_child(Some(&area));
     canvas_overlay.add_overlay(&crop_bar);
+    // Share progress sits at the top, over the canvas edge, like macOS's toast.
+    let transfer = TransferCard::new(false);
+    transfer.root.set_halign(gtk::Align::Center);
+    transfer.root.set_valign(gtk::Align::Start);
+    transfer.root.set_margin_top(12);
+    transfer.root.set_width_request(360);
+    canvas_overlay.add_overlay(&transfer.root);
+    let connect_transfer = |f: fn(&Rc<Editor>)| {
+        let weak = Rc::downgrade(editor);
+        move || {
+            if let Some(editor) = weak.upgrade() {
+                f(&editor);
+            }
+        }
+    };
+    transfer.connect_cancel(connect_transfer(cancel_share));
+    transfer.connect_dismiss(connect_transfer(|e| set_transfer(e, None)));
+    transfer.connect_retry(connect_transfer(share_image));
+    transfer.connect_settings(|| crate::settings::present_sharing(&App::get()));
 
     let inspector = inspector::build(editor, &window);
     let paned = gtk::Paned::builder()
@@ -308,6 +334,8 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
         crop_bar,
         zoom: zoom.clone(),
         toasts,
+        transfer,
+        transfer_timer: RefCell::new(None),
         inspector,
         canvas_keys,
         im,
@@ -327,6 +355,7 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
     connect(&redo, |e| undo_redo(e, false));
     connect(&save, |e| save_edits(e, false));
     connect(&copy, copy_image);
+    connect(&share, share_image);
     connect(&export, export_as);
     connect(&zoom, |e| zoom_action(e, Action::ImageFit));
     connect(&zoom_in, |e| zoom_action(e, Action::ImageZoomIn));
@@ -362,6 +391,9 @@ fn build(app: &App, editor: &Rc<Editor>, opened_from: PathBuf, record_id: Option
 
     let weak = Rc::downgrade(editor);
     window.connect_destroy(move |_| {
+        if let Some(upload) = weak.upgrade().and_then(|e| e.share_upload.borrow_mut().take()) {
+            upload.cancel();
+        }
         OPEN.with(|open| open.borrow_mut().retain(|(_, e)| !weak.upgrade().is_some_and(|w| Rc::ptr_eq(&w, e))));
     });
 
@@ -692,6 +724,7 @@ fn on_key(editor: &Rc<Editor>, key: gdk::Key, state: gdk::ModifierType) -> glib:
         Action::ImageSave => save_edits(editor, false),
         Action::ImageExport => export_as(editor),
         Action::ImageCopy => copy_image(editor),
+        Action::ImageShare => share_image(editor),
         Action::ImageUndo => undo_redo(editor, true),
         Action::ImageRedo => undo_redo(editor, false),
         Action::ImageSelectAll => {
@@ -756,6 +789,114 @@ impl RenderJob {
         .await
         .map_err(|_| "Rendering stopped unexpectedly.".to_owned())?
     }
+}
+
+fn set_transfer(editor: &Rc<Editor>, status: Option<TransferStatus>) {
+    let widgets = editor.widgets.borrow();
+    let Some(w) = widgets.as_ref() else { return };
+    if let Some(id) = w.transfer_timer.borrow_mut().take() {
+        id.remove();
+    }
+    w.transfer.set_status(status.as_ref());
+    if let Some(delay) = status.as_ref().and_then(TransferStatus::auto_dismiss) {
+        let weak = Rc::downgrade(editor);
+        let id = glib::timeout_add_local_once(delay, move || {
+            if let Some(editor) = weak.upgrade() {
+                if let Some(w) = editor.widgets.borrow().as_ref() {
+                    w.transfer_timer.borrow_mut().take();
+                }
+                set_transfer(&editor, None);
+            }
+        });
+        *w.transfer_timer.borrow_mut() = Some(id);
+    }
+}
+
+fn cancel_share(editor: &Rc<Editor>) {
+    if let Some(upload) = editor.share_upload.borrow_mut().take() {
+        upload.cancel();
+    }
+    set_transfer(editor, None);
+}
+
+/// Share to Cloud: uploads the edited image (not the saved export, which
+/// Share never changes), records the link with the capture, and copies it.
+fn share_image(editor: &Rc<Editor>) {
+    if editor.share_upload.borrow().is_some() {
+        return;
+    }
+    canvas::finish_text(editor);
+    let app = App::get();
+    if let Some(blocked) = sharing::blocker(&app) {
+        set_transfer(editor, Some(blocked));
+        return;
+    }
+    set_transfer(editor, Some(TransferStatus::Working { stage: Stage::Rendering, progress: None }));
+    let editor = editor.clone();
+    glib::spawn_future_local(async move {
+        let app = App::get();
+        let name = capture_name(&app, &editor);
+        let rendered = RenderJob::from(&editor)
+            .render()
+            .await
+            .and_then(|image| write_scratch_png(&app, &image, &format!("{name}.png"), "ShareRender"));
+        let path = match rendered {
+            Ok(path) => path,
+            Err(error) => {
+                set_transfer(&editor, Some(TransferStatus::failed("Couldn’t prepare capture", &error)));
+                return;
+            }
+        };
+        let upload = match sharing::start(&app, &path, &name, None) {
+            Ok(upload) => Rc::new(upload),
+            Err(status) => {
+                set_transfer(&editor, Some(status));
+                return;
+            }
+        };
+        set_transfer(&editor, Some(TransferStatus::Working { stage: Stage::Processing, progress: None }));
+        *editor.share_upload.borrow_mut() = Some(upload.clone());
+        let record_id = {
+            let capture = editor.model.borrow().capture.clone();
+            app.state().history.record_matching(&capture).map(|r| r.id)
+        };
+        while let Ok(event) = upload.events.recv().await {
+            if !editor.share_upload.borrow().as_ref().is_some_and(|u| Rc::ptr_eq(u, &upload)) {
+                break;
+            }
+            match event {
+                sharing::Event::Progress(fraction) => set_transfer(
+                    &editor,
+                    Some(TransferStatus::Working { stage: Stage::Uploading, progress: Some(fraction) }),
+                ),
+                sharing::Event::Done(result) => {
+                    editor.share_upload.borrow_mut().take();
+                    match result {
+                        Ok(uploaded) => {
+                            if let Some(id) = record_id {
+                                if let Err(error) =
+                                    app.state_mut().history.set_share_url(id, Some(uploaded.link.clone()))
+                                {
+                                    eprintln!("bettershot: the share link could not be saved to the library: {error}");
+                                }
+                            }
+                            let _ = clipboard::copy_text(&uploaded.link);
+                            set_transfer(&editor, Some(TransferStatus::LinkReady { url: uploaded.link }));
+                            crate::gallery::reload();
+                        }
+                        Err(UploadError::Cancelled) => set_transfer(&editor, None),
+                        Err(UploadError::Failed(message)) => {
+                            set_transfer(&editor, Some(TransferStatus::failed("Upload failed", &message)))
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if let Some(folder) = path.parent() {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    });
 }
 
 fn write_scratch_png(app: &App, image: &RgbaImage, name: &str, purpose: &str) -> Result<PathBuf, String> {

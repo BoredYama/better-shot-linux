@@ -53,7 +53,7 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         shortcut: shortcut_label(app, action),
     };
     vec![
-        entry("Capture Region", "selection-mode-symbolic", Action::Region),
+        entry("Capture Region", "bettershot-region-symbolic", Action::Region),
         entry("Capture Screen", "video-display-symbolic", Action::Fullscreen),
         entry("Capture Window", "window-new-symbolic", Action::Window),
         entry("Capture Previous Region", "view-refresh-symbolic", Action::PreviousRegion),
@@ -61,6 +61,18 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         entry("Scrolling Capture", "view-continuous-symbolic", Action::ScrollCapture),
         entry("Capture Text", "insert-text-symbolic", Action::Ocr),
         entry("Pick Color", "color-select-symbolic", Action::ColorPicker),
+        TrayEntry {
+            label: "Media Gallery".into(),
+            icon: "folder-pictures-symbolic",
+            command: TrayCommand::OpenGallery,
+            shortcut: None,
+        },
+        TrayEntry {
+            label: "Open Image…".into(),
+            icon: "document-open-symbolic",
+            command: TrayCommand::OpenImage,
+            shortcut: None,
+        },
         TrayEntry {
             label: "Settings…".into(),
             icon: "preferences-system-symbolic",
@@ -95,6 +107,7 @@ pub fn start_tray(app: &App) {
                 TrayCommand::Capture(action) => capture::perform(action),
                 TrayCommand::OpenSettings => settings::present(&App::get()),
                 TrayCommand::OpenImage => crate::editor::open_file_dialog(&App::get()),
+                TrayCommand::OpenGallery => crate::gallery::present(&App::get()),
                 TrayCommand::Quit => app::quit_app(),
             }
         }

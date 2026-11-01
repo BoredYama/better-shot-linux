@@ -14,10 +14,15 @@ bettershot-core.workspace = true
 futures-util.workspace = true
 gtk.workspace = true
 ksni.workspace = true
+oo7.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+ureq.workspace = true
 url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 tempfile.workspace = true
 
 [lints]

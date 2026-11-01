@@ -8,11 +8,16 @@ mod color_picker;
 mod countdown;
 mod deck_ui;
 mod editor;
+mod gallery;
+mod onboarding_ui;
 mod pin;
+mod release_notes_ui;
 mod scroll_session;
 mod selector;
 mod services;
 mod settings;
+mod sharing;
+mod transfer_card;
 
 use adw::prelude::*;
 use gtk::{gio, glib};

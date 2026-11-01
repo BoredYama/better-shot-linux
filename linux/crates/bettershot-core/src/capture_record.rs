@@ -52,8 +52,9 @@ pub struct CaptureRecord {
     /// Absolute path when the file lives outside the library and is only referenced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
-    /// Public link from the last successful cloud share, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Public link from the last successful cloud share, if any. Swift's
+    /// key is `shareURL`; earlier Linux builds wrote `shareUrl`.
+    #[serde(default, rename = "shareURL", alias = "shareUrl", skip_serializing_if = "Option::is_none")]
     pub share_url: Option<String>,
 }
 
@@ -131,5 +132,27 @@ mod tests {
     fn movies_are_recordings() {
         assert_eq!(CaptureKind::resolved(Path::new("a.MP4"), CaptureKind::Screenshot), CaptureKind::Recording);
         assert_eq!(CaptureKind::resolved(Path::new("a.png"), CaptureKind::Screenshot), CaptureKind::Screenshot);
+    }
+
+    #[test]
+    fn share_links_use_the_swift_key() {
+        let mut record = serde_json::from_value::<CaptureRecord>(json!({
+            "id": "6BA7B810-9DAD-11D1-80B4-00C04FD430C8", "createdAt": 0.0, "filename": "a.png",
+            "pixelWidth": 1, "pixelHeight": 1, "kind": "screenshot", "hasAnnotations": false,
+            "shareURL": "https://bettershot.site/s/a"
+        }))
+        .unwrap();
+        assert_eq!(record.share_url.as_deref(), Some("https://bettershot.site/s/a"));
+        let value = serde_json::to_value(&record).unwrap();
+        assert_eq!(value["shareURL"], "https://bettershot.site/s/a");
+        assert!(value.get("shareUrl").is_none());
+        // Files from earlier Linux builds still load.
+        record = serde_json::from_value(json!({
+            "id": "6BA7B810-9DAD-11D1-80B4-00C04FD430C8", "createdAt": 0.0, "filename": "a.png",
+            "pixelWidth": 1, "pixelHeight": 1, "kind": "screenshot", "hasAnnotations": false,
+            "shareUrl": "https://bettershot.site/s/b"
+        }))
+        .unwrap();
+        assert_eq!(record.share_url.as_deref(), Some("https://bettershot.site/s/b"));
     }
 }

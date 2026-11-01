@@ -50,6 +50,7 @@ install: release ## Install to $(PREFIX) (default /usr/local)
 	for icon in data/icons/hicolor/scalable/actions/*.svg; do \
 		install -Dm644 "$$icon" $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/$$(basename "$$icon"); \
 	done
+	install -Dm644 ../Resources/Onboarding/coast.png $(DESTDIR)$(PREFIX)/share/bettershot/onboarding/coast.png
 	@# Scrolling capture adapts MacShot (GPLv3); its notice ships with the app.
 	install -Dm644 ../LICENSE $(DESTDIR)$(PREFIX)/share/licenses/bettershot/LICENSE
 	install -Dm644 ../Resources/Licenses/MacShot.txt $(DESTDIR)$(PREFIX)/share/licenses/bettershot/MacShot.txt
@@ -66,4 +67,5 @@ uninstall: ## Remove an installation from $(PREFIX)
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/*/apps/$(APP_ID).png
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/bettershot-*-symbolic.svg
 	rm -rf $(DESTDIR)$(PREFIX)/share/licenses/bettershot
+	rm -rf $(DESTDIR)$(PREFIX)/share/bettershot
 	-update-desktop-database -q $(DESTDIR)$(PREFIX)/share/applications

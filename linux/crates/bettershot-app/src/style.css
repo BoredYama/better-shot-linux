@@ -71,3 +71,36 @@ window.pinned-screenshot {
 .pinned-image {
   border-radius: 8px;
 }
+
+.transfer-card.compact {
+  padding: 8px;
+  border-radius: 10px;
+  background-color: alpha(currentColor, 0.06);
+}
+
+.transfer-card.osd {
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.transfer-card button.small {
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: smaller;
+}
+
+.transfer-card .transfer-link {
+  padding: 0;
+}
+
+.success {
+  color: @success_color;
+}
+
+.onboarding-dot {
+  color: alpha(currentColor, 0.25);
+}
+
+.onboarding-dot.current {
+  color: @accent_color;
+}

@@ -39,6 +39,8 @@ scripts/
 !/scripts/dmg-background.swift
 !/scripts/generate-cap-3d-reference.py
 !/scripts/check-sf-symbols.py
+# The Linux port's checks (CI runs linux/scripts/check-ui.sh).
+!/linux/scripts/
 
 # Claude Code local worktrees (shared CLAUDE.md is tracked)
 .claude/worktrees/

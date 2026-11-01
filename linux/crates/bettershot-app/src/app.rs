@@ -38,6 +38,8 @@ pub struct State {
     hold: Option<gio::ApplicationHoldGuard>,
     /// Keeps the shutter sound alive while it plays.
     pub sound: Option<gtk::MediaFile>,
+    /// R2 keys from the keyring.
+    pub r2: crate::sharing::KeyState,
 }
 
 #[derive(Clone)]
@@ -156,6 +158,7 @@ pub fn startup(application: &adw::Application) {
         tray: None,
         hold: Some(application.hold()),
         sound: None,
+        r2: Default::default(),
     };
     let app = App { application: application.clone(), state: Rc::new(RefCell::new(state)) };
     CURRENT.with(|current| *current.borrow_mut() = Some(app.clone()));
@@ -170,7 +173,14 @@ pub fn startup(application: &adw::Application) {
     }
     gtk::Window::set_default_icon_name(bettershot_core::paths::APP_ID);
     install_actions(&app);
+    crate::sharing::load(&app);
     services::start(&app);
+    // Pending setup first, otherwise unread release notes.
+    if onboarding::should_present(&app.state().prefs) {
+        crate::onboarding_ui::present(&app, false);
+    } else {
+        crate::release_notes_ui::present_pending(&app);
+    }
 }
 
 fn install_actions(app: &App) {
@@ -226,6 +236,7 @@ fn run(_application: &adw::Application, command: Command, cwd: Option<std::path:
             crate::editor::open(&app, &path);
         }
         Command::OpenImage => crate::editor::open_file_dialog(&app),
+        Command::Gallery => crate::gallery::present(&app),
         Command::Quit => quit_app(),
         // Printed by the launching process before the app starts.
         Command::Help | Command::Version => {}

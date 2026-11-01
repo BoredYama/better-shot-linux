@@ -11,6 +11,7 @@ pub mod background;
 pub mod capture_record;
 pub mod deck;
 pub mod file_naming;
+pub mod gallery;
 pub mod geometry;
 pub mod history;
 pub mod imaging;
@@ -28,6 +29,7 @@ pub mod shortcuts;
 pub mod swift_codable;
 pub mod swift_date;
 pub mod text_recognition;
+pub mod transfer;
 pub mod url_action;
 pub mod version;
 

@@ -2,7 +2,7 @@
 //! come from `bettershot-core`, shared with the macOS app's logic.
 
 use crate::app::{App, ShortcutStatus};
-use crate::{cli, services};
+use crate::{cli, services, sharing};
 use adw::prelude::*;
 use bettershot_core::after_capture::{self, AfterCaptureAction, CaptureType};
 use bettershot_core::app_prefs::{
@@ -10,7 +10,9 @@ use bettershot_core::app_prefs::{
 };
 use bettershot_core::imaging::ExportFormat;
 use bettershot_core::overlay_layout::OverlayLayoutPreset;
-use bettershot_core::{shortcuts, version};
+use bettershot_core::r2::{self, Jurisdiction};
+use bettershot_core::{share, shortcuts, version};
+use bettershot_platform::secrets::{self, KeyAccess};
 use gtk::{gio, glib};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -20,9 +22,24 @@ struct ShortcutRows {
     rows: Vec<(shortcuts::Action, gtk::Label)>,
 }
 
+struct SharingRows {
+    status: adw::ActionRow,
+    status_icon: gtk::Image,
+    clear_locked: gtk::Button,
+    access_key: adw::PasswordEntryRow,
+    secret_key: adw::PasswordEntryRow,
+    test: gtk::Button,
+    test_spinner: gtk::Spinner,
+    test_result: gtk::Label,
+    enabled: adw::SwitchRow,
+    direct: adw::SwitchRow,
+    clear_keys: gtk::Button,
+}
+
 thread_local! {
     static WINDOW: RefCell<Option<adw::PreferencesWindow>> = const { RefCell::new(None) };
     static SHORTCUT_ROWS: RefCell<Option<ShortcutRows>> = const { RefCell::new(None) };
+    static SHARING_ROWS: RefCell<Option<SharingRows>> = const { RefCell::new(None) };
 }
 
 /// Shows Settings, reusing the open window.
@@ -34,6 +51,7 @@ pub fn present(app: &App) {
         window.connect_close_request(|_| {
             WINDOW.with(|slot| slot.borrow_mut().take());
             SHORTCUT_ROWS.with(|slot| slot.borrow_mut().take());
+            SHARING_ROWS.with(|slot| slot.borrow_mut().take());
             glib::Propagation::Proceed
         });
         window
@@ -57,6 +75,7 @@ fn build(app: &App) -> adw::PreferencesWindow {
     window.add(&capture_page(app));
     window.add(&deck_page(app));
     window.add(&shortcuts_page(app));
+    window.add(&sharing_page(app, &window));
     window.add(&about_page());
     window
 }
@@ -453,6 +472,386 @@ pub fn refresh_shortcuts(app: &App) {
     });
 }
 
+// MARK: - Sharing
+
+/// Opens Settings on the Sharing page.
+pub fn present_sharing(app: &App) {
+    present(app);
+    WINDOW.with(|window| {
+        if let Some(window) = window.borrow().as_ref() {
+            window.set_visible_page_name("sharing");
+        }
+    });
+}
+
+const R2_DASHBOARD: &str = "https://dash.cloudflare.com/?to=/:account/r2";
+
+/// A problem line under a field, hidden when empty.
+fn problem_label() -> gtk::Label {
+    let label = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["error", "caption"])
+        .margin_top(6)
+        .margin_start(12)
+        .margin_end(12)
+        .visible(false)
+        .build();
+    label.set_accessible_role(gtk::AccessibleRole::Status);
+    label
+}
+
+fn show_problem(label: &gtk::Label, problem: Option<&str>) {
+    label.set_label(problem.unwrap_or_default());
+    label.set_visible(problem.is_some());
+}
+
+/// Writes one bucket setting, trimmed; like macOS, an incomplete setup turns
+/// Upload when I share off.
+fn save_r2_field(app: &App, key: &str, value: &str) {
+    let trimmed = value.trim();
+    if app.state().prefs.string(key).unwrap_or_default() == trimmed {
+        return;
+    }
+    app.set_pref(key, trimmed);
+    after_r2_edit(app);
+}
+
+fn after_r2_edit(app: &App) {
+    if !sharing::credentials(app).is_configured() {
+        app.set_pref(r2::keys::ENABLED, false);
+    }
+    SHARING_ROWS.with(|rows| {
+        if let Some(rows) = rows.borrow().as_ref() {
+            rows.test_result.set_visible(false);
+        }
+    });
+    refresh_sharing(app);
+}
+
+fn sharing_page(app: &App, window: &adw::PreferencesWindow) -> adw::PreferencesPage {
+    let page =
+        adw::PreferencesPage::builder().title("Sharing").name("sharing").icon_name("bettershot-share-symbolic").build();
+
+    let status_group = adw::PreferencesGroup::new();
+    let status = adw::ActionRow::new();
+    PreferencesRowExt::set_use_markup(&status, false);
+    let status_icon = gtk::Image::from_icon_name("bettershot-share-symbolic");
+    status_icon.set_pixel_size(24);
+    status.add_prefix(&status_icon);
+    let clear_locked = gtk::Button::builder()
+        .label("Clear Locked Keys")
+        .css_classes(["destructive-action"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    status.add_suffix(&clear_locked);
+    status_group.add(&status);
+    page.add(&status_group);
+
+    let r2_group = group(
+        "Cloudflare R2",
+        "In the dashboard, create a bucket, turn on public access or bind a custom domain to it, then create an API token under R2 › Manage API Tokens with Object Read & Write. Public Bucket URL is that public address. Your files are served from there, and it is the only place they are stored. Keys are saved to your login keyring and never leave this computer.",
+    );
+    let dashboard = gtk::LinkButton::with_label(R2_DASHBOARD, "Open R2 Dashboard");
+    dashboard.set_valign(gtk::Align::Center);
+    r2_group.set_header_suffix(Some(&dashboard));
+
+    let text_row = |title: &str, hint: &str, key: &'static str| {
+        let row = adw::EntryRow::builder().title(title).show_apply_button(true).build();
+        row.set_text(app.state().prefs.string(key).unwrap_or_default());
+        row.set_tooltip_text(Some(hint));
+        row.connect_apply(move |row| save_r2_field(&App::get(), key, &row.text()));
+        row
+    };
+    r2_group.add(&text_row("Account ID", "From the R2 overview page", r2::keys::ACCOUNT_ID));
+
+    let jurisdictions: Vec<&str> = Jurisdiction::ALL.iter().map(|j| j.title()).collect();
+    let current = Jurisdiction::from_raw_value(app.state().prefs.string(r2::keys::JURISDICTION).unwrap_or_default());
+    let selected = Jurisdiction::ALL.iter().position(|j| *j == current).unwrap_or(0);
+    r2_group.add(&combo_row(
+        "Jurisdiction",
+        "Match the bucket's jurisdiction in the R2 dashboard. Most buckets have none.",
+        &jurisdictions,
+        selected,
+        |index| {
+            let app = App::get();
+            app.set_pref(r2::keys::JURISDICTION, Jurisdiction::ALL[index].raw_value());
+            after_r2_edit(&app);
+        },
+    ));
+
+    let key_row = |title: &str, hint: &str, account: &'static str| {
+        let row = adw::PasswordEntryRow::builder().title(title).show_apply_button(true).build();
+        row.set_tooltip_text(Some(hint));
+        row.connect_apply(move |row| {
+            let value = row.text().trim().to_owned();
+            glib::spawn_future_local(async move {
+                let app = App::get();
+                // Writes only this key, so editing one never rewrites the other.
+                if let Err(error) = sharing::save_key(account, value).await {
+                    app.notify_error("Couldn’t save the key", &error);
+                }
+                after_r2_edit(&app);
+            });
+        });
+        row
+    };
+    let access_key = key_row("Access Key ID", "From your API token", secrets::ACCESS_KEY_ID);
+    let secret_key = key_row("Secret Access Key", "Shown once when the token is created", secrets::SECRET_ACCESS_KEY);
+    r2_group.add(&access_key);
+    r2_group.add(&secret_key);
+    r2_group.add(&text_row("Bucket", "my-bucket", r2::keys::BUCKET));
+
+    let public_url = adw::EntryRow::builder().title("Public Bucket URL").show_apply_button(true).build();
+    public_url.set_text(app.state().prefs.string(r2::keys::PUBLIC_BASE_URL).unwrap_or_default());
+    public_url.set_tooltip_text(Some("https://share.example.com"));
+    let url_problem = problem_label();
+    let problem = url_problem.clone();
+    public_url.connect_apply(move |row| {
+        let app = App::get();
+        let text = row.text();
+        let issue = share::validate_public_base_url(&text).filter(|p| *p != share::PublicBaseUrlProblem::Empty);
+        show_problem(&problem, issue.map(|p| p.message()));
+        if issue.is_some() {
+            row.add_css_class("error");
+        } else {
+            row.remove_css_class("error");
+        }
+        save_r2_field(&app, r2::keys::PUBLIC_BASE_URL, &text);
+        // A direct link points straight at this address, so it must be valid.
+        if share::validate_public_base_url(&text).is_some() && app.state().prefs.bool(r2::keys::USE_DIRECT_LINKS) {
+            app.set_pref(r2::keys::USE_DIRECT_LINKS, false);
+            refresh_sharing(&app);
+        }
+    });
+    r2_group.add(&public_url);
+    r2_group.add(&url_problem);
+    page.add(&r2_group);
+
+    let share_group = group(
+        "Sharing",
+        "A successful test turns uploads on for you. With uploads off, everything stays on this computer. A viewer link shows the title, a poster and a download button, and hides the filename behind a random ID; a direct link is the raw file, filename and all.",
+    );
+    let connection = adw::ActionRow::new();
+    plain_text(&connection, "Connection", "Checks that BetterShot can upload to this bucket.");
+    let test_spinner = gtk::Spinner::new();
+    test_spinner.set_visible(false);
+    let test = gtk::Button::builder().label("Test Connection").valign(gtk::Align::Center).build();
+    connection.add_suffix(&test_spinner);
+    connection.add_suffix(&test);
+    share_group.add(&connection);
+    let test_result = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["caption"])
+        .margin_top(6)
+        .margin_start(12)
+        .margin_end(12)
+        .visible(false)
+        .build();
+    test_result.set_accessible_role(gtk::AccessibleRole::Status);
+    share_group.add(&test_result);
+
+    let enabled = switch_row(
+        "Upload when I share",
+        "Sharing a screenshot uploads it to this bucket and copies a link.",
+        app.state().prefs.bool(r2::keys::ENABLED),
+        |on| App::get().set_pref(r2::keys::ENABLED, on),
+    );
+    share_group.add(&enabled);
+    let direct_problem = problem_label();
+    let direct = adw::SwitchRow::new();
+    plain_text(
+        &direct,
+        "Copy direct file links",
+        "Link straight to the file in your bucket instead of a viewer page on bettershot.site.",
+    );
+    direct.set_active(app.state().prefs.bool(r2::keys::USE_DIRECT_LINKS));
+    let problem = direct_problem.clone();
+    // Turning the switch back off after a refusal must keep the explanation.
+    let reverting = std::rc::Rc::new(std::cell::Cell::new(false));
+    direct.connect_active_notify(move |row| {
+        if reverting.get() {
+            return;
+        }
+        let app = App::get();
+        let on = row.is_active();
+        let url = app.state().prefs.string(r2::keys::PUBLIC_BASE_URL).unwrap_or_default().to_owned();
+        if on && share::validate_public_base_url(&url).is_some() {
+            show_problem(
+                &problem,
+                Some("Add the Public Bucket URL above first - a direct link points straight at it."),
+            );
+            reverting.set(true);
+            row.set_active(false);
+            reverting.set(false);
+            return;
+        }
+        show_problem(&problem, None);
+        if app.state().prefs.bool(r2::keys::USE_DIRECT_LINKS) != on {
+            app.set_pref(r2::keys::USE_DIRECT_LINKS, on);
+        }
+    });
+    share_group.add(&direct);
+    share_group.add(&direct_problem);
+
+    let keys_row = adw::ActionRow::new();
+    plain_text(&keys_row, "Saved keys", "Remove the API keys from your keyring.");
+    let clear_keys = gtk::Button::builder()
+        .label("Clear Keys…")
+        .css_classes(["destructive-action"])
+        .valign(gtk::Align::Center)
+        .build();
+    keys_row.add_suffix(&clear_keys);
+    share_group.add(&keys_row);
+    page.add(&share_group);
+
+    let confirm_window = window.clone();
+    let confirm_clear = move || {
+        let dialog = adw::AlertDialog::new(
+            Some("Clear saved keys?"),
+            Some("You will need to enter your API keys again to share captures. Existing cloud shares stay available."),
+        );
+        dialog.add_responses(&[("cancel", "Cancel"), ("clear", "Clear Keys")]);
+        dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        dialog.choose(Some(&confirm_window), None::<&gio::Cancellable>, |response| {
+            if response != "clear" {
+                return;
+            }
+            glib::spawn_future_local(async {
+                let app = App::get();
+                if let Err(error) = sharing::forget_keys().await {
+                    app.notify_error("Couldn’t clear the keys", &error);
+                }
+                SHARING_ROWS.with(|rows| {
+                    if let Some(rows) = rows.borrow().as_ref() {
+                        rows.access_key.set_text("");
+                        rows.secret_key.set_text("");
+                    }
+                });
+                after_r2_edit(&app);
+            });
+        });
+    };
+    let confirm = confirm_clear.clone();
+    clear_keys.connect_clicked(move |_| confirm());
+    clear_locked.connect_clicked(move |_| confirm_clear());
+
+    test.connect_clicked(|_| {
+        let app = App::get();
+        let credentials = sharing::credentials(&app);
+        SHARING_ROWS.with(|rows| {
+            if let Some(rows) = rows.borrow().as_ref() {
+                rows.test.set_sensitive(false);
+                rows.test_spinner.set_visible(true);
+                rows.test_spinner.set_spinning(true);
+                rows.test_result.set_visible(false);
+            }
+        });
+        glib::spawn_future_local(async move {
+            let result = sharing::test_connection(credentials).await;
+            let app = App::get();
+            if result.is_ok() {
+                app.set_pref(r2::keys::ENABLED, true);
+            }
+            SHARING_ROWS.with(|rows| {
+                if let Some(rows) = rows.borrow().as_ref() {
+                    rows.test_spinner.set_spinning(false);
+                    rows.test_spinner.set_visible(false);
+                    match &result {
+                        Ok(()) => {
+                            rows.test_result.set_label("Connected");
+                            rows.test_result.remove_css_class("error");
+                            rows.test_result.add_css_class("success");
+                        }
+                        Err(message) => {
+                            rows.test_result.set_label(message);
+                            rows.test_result.remove_css_class("success");
+                            rows.test_result.add_css_class("error");
+                        }
+                    }
+                    rows.test_result.set_visible(true);
+                }
+            });
+            refresh_sharing(&app);
+        });
+    });
+
+    SHARING_ROWS.with(|slot| {
+        *slot.borrow_mut() = Some(SharingRows {
+            status,
+            status_icon,
+            clear_locked,
+            access_key,
+            secret_key,
+            test,
+            test_spinner,
+            test_result,
+            enabled,
+            direct,
+            clear_keys,
+        })
+    });
+    refresh_sharing(app);
+    page
+}
+
+/// Brings the Sharing page in line with the stored settings and keys.
+pub fn refresh_sharing(app: &App) {
+    let credentials = sharing::credentials(app);
+    let (access, keys_loaded) = {
+        let state = app.state();
+        (state.r2.access.clone(), state.r2.loaded)
+    };
+    SHARING_ROWS.with(|rows| {
+        let rows = rows.borrow();
+        let Some(rows) = rows.as_ref() else { return };
+        if keys_loaded && rows.access_key.text().is_empty() && rows.secret_key.text().is_empty() {
+            rows.access_key.set_text(&credentials.access_key_id);
+            rows.secret_key.set_text(&credentials.secret_access_key);
+        }
+        let configured = credentials.is_configured();
+        let (icon, title, detail) = match (&access, configured, credentials.enabled) {
+            (KeyAccess::Blocked(reason), _, _) => (
+                "dialog-warning-symbolic",
+                "Your saved keys are locked",
+                format!("{reason} Clear the old keys and paste them in again if this keeps happening."),
+            ),
+            (_, false, _) => (
+                "bettershot-share-symbolic",
+                "Share links are not set up",
+                "Add your Cloudflare R2 details below and every share becomes a link.".into(),
+            ),
+            (_, true, false) => (
+                "bettershot-share-symbolic",
+                "Set up, uploads are off",
+                "Turn on Upload when I share below and sharing will copy a link.".into(),
+            ),
+            (_, true, true) => (
+                "emblem-ok-symbolic",
+                "Share links are ready",
+                "Share a capture from its card or the editor and the link lands on your clipboard. Shared captures are listed in the Media Gallery.".into(),
+            ),
+        };
+        rows.status_icon.set_icon_name(Some(icon));
+        PreferencesRowExt::set_title(&rows.status, title);
+        ActionRowExt::set_subtitle(&rows.status, &detail);
+        rows.clear_locked.set_visible(matches!(access, KeyAccess::Blocked(_)));
+        rows.test.set_sensitive(configured && !rows.test_spinner.is_visible());
+        rows.enabled.set_sensitive(configured);
+        if rows.enabled.is_active() != credentials.enabled {
+            rows.enabled.set_active(credentials.enabled);
+        }
+        if rows.direct.is_active() != credentials.use_direct_links {
+            rows.direct.set_active(credentials.use_direct_links);
+        }
+        rows.clear_keys.set_sensitive(!credentials.access_key_id.is_empty() || !credentials.secret_access_key.is_empty());
+    });
+}
+
 // MARK: - About
 
 fn about_page() -> adw::PreferencesPage {
@@ -473,6 +872,24 @@ fn about_page() -> adw::PreferencesPage {
         info.add(&row);
     }
     page.add(&info);
+
+    let more = group("", "");
+    for (title, subtitle, action) in
+        [("What’s New", "Release notes for this version", 0), ("Take the Tour", "Walk through setup again", 1)]
+    {
+        let row = adw::ActionRow::builder().title(title).subtitle(subtitle).activatable(true).build();
+        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        row.connect_activated(move |_| {
+            let app = App::get();
+            if action == 0 {
+                crate::release_notes_ui::present(&app);
+            } else {
+                crate::onboarding_ui::present(&app, true);
+            }
+        });
+        more.add(&row);
+    }
+    page.add(&more);
 
     page
 }

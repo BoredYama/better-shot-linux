@@ -5,11 +5,13 @@ Swift sources in `../Sources` remain the reference implementation; the
 [port plan](../docs/linux-port-plan.md) describes the stack, phases, and
 Wayland constraints.
 
-**Status:** Phase 3, screenshots, the image editor, and capture extras. Capture
-an area, the screen, a window, the previous area, or a scrolling area; copy,
-save, drag, pin, or edit captures from the capture deck; annotate and frame
-them in the editor, with smart redaction of sensitive text; copy text from the
-screen with OCR; and pick colors. Sharing and recording come in later phases.
+**Status:** Phase 4, screenshots, the image editor, capture extras, sharing,
+and the library. Capture an area, the screen, a window, the previous area, or a
+scrolling area; copy, save, drag, pin, share, or edit captures from the capture
+deck; annotate and frame them in the editor, with smart redaction of sensitive
+text; copy text from the screen with OCR; pick colors; share links through
+your own Cloudflare R2 bucket; and browse everything in the Media Gallery.
+Recording comes in a later phase.
 
 ## Install from source
 
@@ -19,7 +21,8 @@ xdg-desktop-portal with your desktop's backend (GNOME, KDE, or wlr), which
 most desktops install by default. Capture Text and smart redaction use
 [Tesseract](https://github.com/tesseract-ocr/tesseract) 4 or later with a
 language pack; `zbarimg` (zbar-tools), if installed, also reads QR codes and
-barcodes.
+barcodes. Cloud sharing stores its keys with a Secret Service provider (GNOME
+Keyring, KWallet, or KeePassXC), which desktops normally run.
 
 ```bash
 # Ubuntu / Debian
@@ -51,6 +54,7 @@ Then open BetterShot from your app menu. `make uninstall` removes it.
 | `bettershot capture color` | Pick a color on screen and copy its hex value |
 | `bettershot edit FILE` | Open an image in the editor (also "Open With" for PNG and JPEG) |
 | `bettershot open-image` | Choose an image to edit |
+| `bettershot gallery` | Open the Media Gallery |
 | `bettershot bettershot://capture/region` | Run a BetterShot URL (also `capture/scroll`, `ocr`, `color-picker`) |
 | `bettershot quit` | Quit the running instance |
 
@@ -100,6 +104,30 @@ region, screen, and window screenshots to `Pictures/Screenshots`
 automatically. Turn this off, or change the folder and format, in
 Settings > General.
 
+**Sharing** uploads a capture to your own Cloudflare R2 bucket and copies a
+link. Set it up in Settings › Sharing: Account ID, Jurisdiction, the API
+token's Access Key ID and Secret Access Key, Bucket, and the bucket's public
+address; Test Connection checks them and turns on Upload when I share. Then
+Share (the cloud button) on a capture card or in the editor compresses the
+image, uploads it with a poster and a manifest, and copies a link to a viewer
+page on bettershot.site, or with Copy direct file links, to the file itself.
+Progress, the link, and failures with Retry show on the card or at the top of
+the editor. The link is saved with the capture, and the same bucket and links
+work with the macOS app. Keys go to your login keyring, never a file.
+
+**The Media Gallery** (`bettershot gallery`, or Media Gallery in the tray)
+lists captures On this Computer and Cloud Shares, as icons or a list, with
+search and sorting. Double-click opens a capture as a card; its menu (or a
+right-click) offers Open, Edit, Show in Files, Copy Link, Open Cloud Link, and
+Move to Trash or Delete Cloud Share, each asking first. A shared capture moved
+to the trash stays under Cloud Shares until you delete the share.
+
+**First run** opens a four-step setup: Welcome; a check of screenshot access
+and global shortcuts; where screenshots go and whether they save
+automatically; and a practice capture. It resumes where you left off and never
+returns once skipped or done; Settings › About › Take the Tour reopens it.
+After an update, What's New shows the release notes once; About reopens them.
+
 **Pinned screenshots** float as borderless windows. Drag one to move it,
 scroll over it to scale it (a quarter to four times), hover for its close
 button, or right-click to copy or close it. Ctrl+C copies and Ctrl+W closes.
@@ -130,6 +158,12 @@ action. Add a custom shortcut in your system's keyboard settings that runs it,
 for example `bettershot capture region`.
 
 ### Known limitations
+
+- **Upload progress** advances per file (the capture, its poster, and the
+  manifest) rather than continuously, because R2 needs each file's size up
+  front. Video shares arrive with recording.
+- **Release notes** come from the macOS changelog, so they describe some
+  features Linux doesn't have yet; the window says so.
 
 - **Scrolling capture is manual.** macOS adds frames on its own as you scroll
   and auto-scrolls. Wayland gives apps neither scroll events from other apps
@@ -166,7 +200,7 @@ for example `bettershot capture region`.
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
 | [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas and every export |
-| [`bettershot-platform`](crates/bettershot-platform) | Screenshot and GlobalShortcuts portals, `grim` fallback, tray |
+| [`bettershot-platform`](crates/bettershot-platform) | Screenshot and GlobalShortcuts portals, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
 
 ### What `bettershot-core` covers
@@ -176,6 +210,7 @@ Each module names the Swift file it ports. Keep the two in step.
 | Module | Ports |
 | --- | --- |
 | `annotation` | `Shape.swift`, `AnnotationDocument.swift`, `AnnotationBackground*.swift`, `AnnotationImageTransform.swift`: shapes, the `.bettershot` sidecar, background layout, crop/rotate/flip |
+| `gallery`, `transfer` | `MediaGallery.swift` and `MediaGalleryActions.swift` (items, filters, sorting, deletion); the `TransferStatusCard` model |
 | `text_recognition` | `ImageTextRecognizer.swift`, `SmartRedactionRecognizer.swift`, and `ColorPickerOverlay.hexFromColor`: Tesseract output, sensitive-text rules, hex colors |
 | `scroll_capture` | `ScrollFrameAnalyzer.swift` and `ScrollCaptureController`'s registration and merge rules (adapted from MacShot, GPLv3) |
 | `pin` | `PinnedScreenshot.swift`: pin size and scroll-scaling |
@@ -191,7 +226,7 @@ Each module names the Swift file it ports. Keep the two in step.
 | `release_notes`, `onboarding` | `ReleaseNotes.swift`, `OnboardingState.swift` |
 | `background` | `BackgroundStyle.swift`, color grades, `BeautifierConfig` |
 | `capture_record` | `CaptureRecord.swift` (`history.json` entries) |
-| `share`, `r2` | Share manifests and links, R2 SigV4 signing and request building |
+| `share`, `r2` | `ShareManifest.swift`, `ShareImageCompressor.swift`, and `R2Uploader.swift`'s signing: manifests, posters, upload compression, links, SigV4 requests |
 | `prefs`, `paths`, `version` | `UserDefaults` stand-in, XDG directories, `version.json` |
 
 Files shared with the macOS app (history, Default Look, editor sidecars, share
@@ -232,14 +267,17 @@ make check-ui     # drive the real app under Xvfb with a fixture screen
 ```
 
 `make check-ui` needs Xvfb, Openbox, xdotool, xclip, ImageMagick,
-`dbus-run-session`, Python with Pillow, and Tesseract. It runs region capture
+`dbus-run-session`, Python with Pillow, and Tesseract. It also runs a fake R2
+bucket on 127.0.0.1 with fixture keys, so it never touches real credentials. It runs region capture
 with automatic saving on and off, Escape, the card's Save button with Settings
 open, Capture Previous Region, Hide After, the editor (drawing shapes and text,
 a gradient background, Save, rotating, the unsaved-changes prompt, reopening,
 and crop), Capture Text (with and without line breaks, and an empty area that
 must leave the clipboard alone), Pick Color, smart redaction, Capture Region &
-Pin (scaling, the context menu, Ctrl+W), and a scrolling capture stitched from
-fixture frames, in light and dark appearances.
+Pin (scaling, the context menu, Ctrl+W), a scrolling capture stitched from
+fixture frames, sharing from a card and from the editor, the Sharing settings,
+the Media Gallery (cloud list, Delete Cloud Share, Move to Trash), first-run
+setup, and What's New, in light and dark appearances.
 `BETTERSHOT_UI_ONLY=text,scroll` runs only the named scenarios. Each step's screenshot
 lands in `target/ui-snapshots/`. It replaces the portal with a fixture image,
 so it cannot check real portals, Wayland compositors, global shortcuts, the
@@ -251,4 +289,7 @@ writes a render of every shape and background feature to
 
 Tests run with `BETTERSHOT_TESTING=1`, which keeps every file in a temporary
 folder, and `BETTERSHOT_FAKE_SCREEN` (honored only in testing) substitutes the
-screenshot; a folder of images plays them in name order, one per screenshot. The crate versions must match `version.json`; a test enforces it.
+screenshot; a folder of images plays them in name order, one per screenshot.
+In testing, R2 keys come from `config/test-r2-keys.json` instead of the
+keyring, `BETTERSHOT_R2_ENDPOINT` points uploads at a local fake, and Move to
+Trash uses a private folder. The crate versions must match `version.json`; a test enforces it.

@@ -95,7 +95,7 @@ impl OverlayTool {
             Self::Copy => "edit-copy-symbolic",
             Self::Save => "document-save-symbolic",
             Self::Edit => "document-edit-symbolic",
-            Self::Share => "send-to-symbolic",
+            Self::Share => "bettershot-share-symbolic",
         }
     }
 }

@@ -249,6 +249,23 @@ impl HistoryStore {
         self.save()
     }
 
+    /// Clears a deleted share link, dropping records that then have neither a
+    /// link nor a file (port of `forgetCloudLink`).
+    pub fn forget_cloud_link(&mut self, link: &str) -> io::Result<()> {
+        if !self.records.iter().any(|r| r.share_url.as_deref() == Some(link)) {
+            return Ok(());
+        }
+        for record in self.records.iter_mut().filter(|r| r.share_url.as_deref() == Some(link)) {
+            record.share_url = None;
+        }
+        let kept: Vec<CaptureRecord> = std::mem::take(&mut self.records)
+            .into_iter()
+            .filter(|r| r.share_url.is_some() || self.path_for_record(r).exists())
+            .collect();
+        self.records = kept;
+        self.save()
+    }
+
     /// Forgets local records, keeping any that still carry a share link.
     pub fn forget_local_records(&mut self, ids: &HashSet<Uuid>) -> io::Result<()> {
         self.records.retain(|r| !ids.contains(&r.id) || r.share_url.is_some());

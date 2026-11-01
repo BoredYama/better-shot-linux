@@ -16,6 +16,8 @@ pub enum Command {
     Edit(String),
     /// Choose an image to open in the editor.
     OpenImage,
+    /// Open the Media Gallery.
+    Gallery,
     Settings,
     Quit,
     Help,
@@ -48,7 +50,7 @@ pub fn command_for(action: Action) -> Option<String> {
 
 pub fn help() -> String {
     let mut text = String::from(
-        "Usage: bettershot [COMMAND]\n\nCommands:\n  (none)                     Open BetterShot\n  --background               Start in the tray without opening a window\n  settings                   Open Settings\n  edit FILE                  Open an image in the editor\n  open-image                 Choose an image to edit\n  quit                       Quit the running instance\n",
+        "Usage: bettershot [COMMAND]\n\nCommands:\n  (none)                     Open BetterShot\n  --background               Start in the tray without opening a window\n  settings                   Open Settings\n  edit FILE                  Open an image in the editor\n  open-image                 Choose an image to edit\n  gallery                    Open the Media Gallery\n  quit                       Quit the running instance\n",
     );
     for (name, _, description) in CAPTURE_COMMANDS {
         text.push_str(&format!("  {:<27}{description}\n", format!("capture {name}")));
@@ -68,6 +70,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         ["-V"] | ["--version"] => Ok(Command::Version),
         ["settings"] => Ok(Command::Settings),
         ["open-image"] => Ok(Command::OpenImage),
+        ["gallery"] => Ok(Command::Gallery),
         ["edit", path] => Ok(Command::Edit((*path).to_owned())),
         ["quit"] => Ok(Command::Quit),
         ["capture", name] => CAPTURE_COMMANDS
@@ -143,6 +146,7 @@ mod tests {
         assert_eq!(parse_str(&["settings"]), Ok(Command::Settings));
         assert_eq!(parse_str(&["edit", "/tmp/a.png"]), Ok(Command::Edit("/tmp/a.png".into())));
         assert_eq!(parse_str(&["open-image"]), Ok(Command::OpenImage));
+        assert_eq!(parse_str(&["gallery"]), Ok(Command::Gallery));
         assert!(parse_str(&["capture", "nope"]).is_err());
         assert!(parse_str(&["capture"]).is_err());
         assert!(parse_str(&["frobnicate"]).is_err());

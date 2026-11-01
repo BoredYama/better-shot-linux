@@ -62,10 +62,65 @@ pub fn position() -> Option<(f64, f64)> {
     Some((f64::from(reply.root_x), f64::from(reply.root_y)))
 }
 
+/// Turns pointer readings, relative to the recorded region (0...1 inside
+/// it), into the sidecar's travel samples and presses. The X11 sampler and
+/// the GNOME helper's trace both feed it, so their output agrees.
+/// Buttons are bits: 1 left, 2 right, 4 middle (the sidecar's 0, 1, 2).
+#[derive(Debug, Default)]
+pub struct PointerEvents {
+    pub travel: Vec<PointerTravelSample>,
+    pub presses: Vec<PointerPressEvent>,
+    last_position: Option<(f64, f64)>,
+    buttons_down: u8,
+}
+
+/// Button bits → the sidecar's button numbers.
+const BUTTON_BITS: [(u8, i64); 3] = [(1, 0), (2, 1), (4, 2)];
+
+impl PointerEvents {
+    /// Records a reading at `time` on the movie's timeline.
+    pub fn push(&mut self, time: f64, x: f64, y: f64, buttons: u8) {
+        let inside = (-0.001..=1.001).contains(&x) && (-0.001..=1.001).contains(&y);
+        for (bit, button) in BUTTON_BITS {
+            let was = self.buttons_down & bit != 0;
+            let is = buttons & bit != 0;
+            if was != is && inside {
+                self.presses.push(PointerPressEvent {
+                    time,
+                    x: x.clamp(0.0, 1.0),
+                    y: y.clamp(0.0, 1.0),
+                    button,
+                    phase: if is { PressPhase::Down } else { PressPhase::Up },
+                    artwork_id: None,
+                });
+            }
+        }
+        let moved = self.last_position != Some((x, y));
+        if inside && (moved || self.travel.is_empty()) {
+            self.travel.push(PointerTravelSample {
+                time,
+                x: x.clamp(0.0, 1.0),
+                y: y.clamp(0.0, 1.0),
+                kind: if buttons != 0 { PointerTravelKind::Drag } else { PointerTravelKind::Move },
+                artwork_id: None,
+            });
+        }
+        self.last_position = Some((x, y));
+        self.buttons_down = buttons;
+    }
+
+    /// Notes the buttons of a reading taken while paused, so resuming does
+    /// not report a press that happened during the pause. The position is
+    /// not noted: the first reading after resuming is recorded wherever the
+    /// pointer moved meanwhile.
+    pub fn observe(&mut self, buttons: u8) {
+        self.buttons_down = buttons;
+    }
+}
+
 #[derive(Default)]
 struct Shared {
-    travel: Vec<PointerTravelSample>,
-    presses: Vec<PointerPressEvent>,
+    events: PointerEvents,
     keystrokes: Vec<RecordingKeystrokeEvent>,
     pause_started: Option<Instant>,
     paused_total: f64,
@@ -129,12 +184,14 @@ impl PointerSampler {
         let keep = |time: f64| time >= 0.0 && time <= duration + 0.5;
         PointerCaptureFile {
             travel: shared
+                .events
                 .travel
                 .into_iter()
                 .filter(|s| keep(s.time))
                 .map(|s| PointerTravelSample { time: s.time.min(duration), ..s })
                 .collect(),
             presses: shared
+                .events
                 .presses
                 .into_iter()
                 .filter(|p| keep(p.time))
@@ -160,8 +217,8 @@ impl Drop for PointerSampler {
     }
 }
 
-/// X button masks → the sidecar's button numbers (0 left, 1 right, 2 middle).
-const BUTTONS: [(KeyButMask, i64); 3] = [(KeyButMask::BUTTON1, 0), (KeyButMask::BUTTON3, 1), (KeyButMask::BUTTON2, 2)];
+/// X button masks → `PointerEvents` button bits (1 left, 2 right, 4 middle).
+const BUTTONS: [(KeyButMask, u8); 3] = [(KeyButMask::BUTTON1, 1), (KeyButMask::BUTTON3, 2), (KeyButMask::BUTTON2, 4)];
 
 struct Keymap {
     min_keycode: u8,
@@ -195,8 +252,6 @@ fn sample_loop(region: Rect, started: Instant, shared: &Mutex<Shared>, stop: &At
             keysyms: reply.keysyms,
         });
     let interval = Duration::from_secs_f64(1.0 / SAMPLE_RATE);
-    let mut last_position: Option<(f64, f64)> = None;
-    let mut buttons_down: u16 = 0;
     let mut keys_down = [0u8; 32];
     let mut next_tick = Instant::now();
     while !stop.load(Ordering::Relaxed) {
@@ -212,37 +267,14 @@ fn sample_loop(region: Rect, started: Instant, shared: &Mutex<Shared>, stop: &At
         let time = started.elapsed().as_secs_f64() - shared.lock().map(|s| s.paused_total).unwrap_or(0.0);
         let x = (f64::from(pointer.root_x) - region.x) / region.width;
         let y = (f64::from(pointer.root_y) - region.y) / region.height;
-        let inside = (-0.001..=1.001).contains(&x) && (-0.001..=1.001).contains(&y);
         let mask = pointer.mask;
-        let pressed: u16 = BUTTONS.iter().filter(|(flag, _)| has(mask, *flag)).map(|(flag, _)| u16::from(*flag)).sum();
+        let pressed: u8 = BUTTONS.iter().filter(|(flag, _)| has(mask, *flag)).map(|(_, bit)| *bit).sum();
 
-        let position = (x, y);
-        if !paused {
-            let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
-            for (flag, button) in BUTTONS {
-                let was = buttons_down & u16::from(flag) != 0;
-                let is = pressed & u16::from(flag) != 0;
-                if was != is && inside {
-                    shared.presses.push(PointerPressEvent {
-                        time,
-                        x: x.clamp(0.0, 1.0),
-                        y: y.clamp(0.0, 1.0),
-                        button,
-                        phase: if is { PressPhase::Down } else { PressPhase::Up },
-                        artwork_id: None,
-                    });
-                }
-            }
-            let moved = last_position != Some(position);
-            if inside && (moved || shared.travel.is_empty()) {
-                shared.travel.push(PointerTravelSample {
-                    time,
-                    x: x.clamp(0.0, 1.0),
-                    y: y.clamp(0.0, 1.0),
-                    kind: if pressed != 0 { PointerTravelKind::Drag } else { PointerTravelKind::Move },
-                    artwork_id: None,
-                });
-            }
+        let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
+        if paused {
+            shared.events.observe(pressed);
+        } else {
+            shared.events.push(time, x, y, pressed);
             if let (Some(keys), Some(keymap)) = (keys, &keymap) {
                 for (byte, (now, before)) in keys.iter().zip(keys_down.iter()).enumerate() {
                     let newly = now & !before;
@@ -262,8 +294,7 @@ fn sample_loop(region: Rect, started: Instant, shared: &Mutex<Shared>, stop: &At
                 }
             }
         }
-        last_position = Some(position);
-        buttons_down = pressed;
+        drop(shared);
         if let Some(keys) = keys {
             keys_down = keys;
         }
@@ -333,6 +364,36 @@ fn key_label(keysym: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readings_become_travel_and_presses() {
+        let mut events = PointerEvents::default();
+        events.push(0.0, 0.5, 0.5, 0);
+        events.push(0.1, 0.5, 0.5, 0);
+        events.push(0.2, 0.6, 0.5, 1);
+        events.push(0.3, 0.7, 0.5, 1);
+        events.push(0.4, 0.7, 0.5, 0);
+        events.push(0.5, 1.5, 0.5, 2); // outside: neither travel nor a press
+        events.observe(2); // paused: the buttons are noted, not recorded
+        events.push(0.6, 0.2, 0.2, 0); // released after the pause
+        let travel: Vec<(f64, f64, PointerTravelKind)> = events.travel.iter().map(|t| (t.time, t.x, t.kind)).collect();
+        assert_eq!(
+            travel,
+            [
+                (0.0, 0.5, PointerTravelKind::Move),
+                (0.2, 0.6, PointerTravelKind::Drag),
+                (0.3, 0.7, PointerTravelKind::Drag),
+                (0.6, 0.2, PointerTravelKind::Move),
+            ],
+            "an unchanged reading adds nothing"
+        );
+        let presses: Vec<(f64, i64, PressPhase)> = events.presses.iter().map(|p| (p.time, p.button, p.phase)).collect();
+        assert_eq!(
+            presses,
+            [(0.2, 0, PressPhase::Down), (0.4, 0, PressPhase::Up), (0.6, 1, PressPhase::Up)],
+            "the right button went down outside the region and up inside it"
+        );
+    }
     use x11rb::protocol::xtest::ConnectionExt as _;
 
     #[test]

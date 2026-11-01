@@ -45,6 +45,9 @@ pub struct RecordingRequest {
     pub camera: Option<String>,
     /// The portal's token from the previous recording, which skips its picker.
     pub restore_token: Option<String>,
+    /// The caller traces the pointer itself (the GNOME helper on Wayland),
+    /// so the system cursor may be hidden from the pixels.
+    pub pointer_traced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -260,7 +263,9 @@ async fn portal_source(
     };
     let cursor_modes = proxy.available_cursor_modes().await.unwrap_or_default();
     // The sampler needs the stream's placement, which windows do not report.
-    let hide = samples_pointer && request.mode != SourceMode::Window && cursor_modes.contains(CursorMode::Hidden);
+    let hide = (samples_pointer || request.pointer_traced)
+        && request.mode != SourceMode::Window
+        && cursor_modes.contains(CursorMode::Hidden);
     let cursor = if hide {
         CursorMode::Hidden
     } else if cursor_modes.contains(CursorMode::Embedded) {
@@ -734,6 +739,7 @@ mod tests {
             microphone: Some("mic".into()),
             camera: Some("cam".into()),
             restore_token: None,
+            pointer_traced: false,
         };
         let finished = gtk::glib::MainContext::default().block_on(async {
             let (recorder, warnings) = Recorder::start(None, request).await.expect("recording starts");

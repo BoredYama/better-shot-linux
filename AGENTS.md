@@ -202,8 +202,14 @@ a PR unless explicitly requested.
   bar at 64/38 px, the Background, Cursor, Camera, Effects, Zoom & Clips, and
   Export sections, native GTK dialogs for destructive actions.
 - The preview and every export draw through `bettershot-render`; never add a
-  second drawing path. Portals, PipeWire, X11 sampling, and the keyring live
-  in `bettershot-platform`.
+  second drawing path. Portals, PipeWire, X11 sampling, the GNOME helper
+  client, and the keyring live in `bettershot-platform`.
+- `linux/gnome-extension/` is the optional BetterShot Helper GNOME Shell
+  extension. Keep it serving only the installed BetterShot binary (device and
+  inode of the caller's `/proc/<pid>/exe`) and writing only inside the user's
+  runtime folder, bump its API version for incompatible D-Bus changes, keep
+  every app path working without it, and verify changes with
+  `make -C linux check-gnome-helper`.
 - Verify with `make -C linux check` (format, clippy with warnings as errors,
   tests under `BETTERSHOT_TESTING=1`) and `make -C linux check-ui` (the real
   app under Xvfb in light and dark). Report what the headless checks cannot

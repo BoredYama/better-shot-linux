@@ -18,6 +18,7 @@ use bettershot_core::recording::{
     RecordingState, SourceMode,
 };
 use bettershot_core::shortcuts::Action;
+use bettershot_platform::gnome_helper::{Helper, HelperTrace};
 use bettershot_platform::media;
 use bettershot_platform::pointer::{self, PointerSampler};
 use bettershot_platform::recorder::{Finished, Recorder, RecordingRequest, StartError};
@@ -36,12 +37,70 @@ enum FinishAction {
     Terminate,
 }
 
+/// Follows the pointer while the system cursor is hidden from the pixels:
+/// the X11 sampler, or on Wayland the GNOME helper's pointer trace.
+enum PointerSource {
+    X11(PointerSampler),
+    Helper(HelperTrace),
+}
+
+impl PointerSource {
+    fn pause(&self) {
+        match self {
+            Self::X11(sampler) => sampler.pause(),
+            Self::Helper(trace) => trace.pause(),
+        }
+    }
+
+    fn resume(&self) {
+        match self {
+            Self::X11(sampler) => sampler.resume(),
+            Self::Helper(trace) => trace.resume(),
+        }
+    }
+
+    fn stop(&mut self) {
+        match self {
+            Self::X11(sampler) => sampler.stop(),
+            Self::Helper(trace) => trace.stop(),
+        }
+    }
+
+    async fn finish(self, duration: f64) -> PointerCaptureFile {
+        match self {
+            Self::X11(sampler) => gio::spawn_blocking(move || sampler.finish(duration)).await.unwrap_or_default(),
+            Self::Helper(trace) => trace.finish(duration).await,
+        }
+    }
+}
+
+/// On Wayland, starts the GNOME helper's pointer trace before the recording,
+/// so the system cursor can be hidden and restyled in the studio. Windows
+/// report no placement, so they keep the cursor in the pixels.
+async fn start_helper_trace(mode: SourceMode) -> Option<(HelperTrace, bettershot_core::stage_map::StageMap)> {
+    if mode == SourceMode::Window || pointer::available() || capture::uses_fake_screen() {
+        return None;
+    }
+    let helper = Helper::connect().await.ok()?;
+    let layout_monitors: Vec<Rect> = capture::layout()?.monitors.iter().map(|(_, rect)| *rect).collect();
+    let map = helper.info.stage_map(&layout_monitors);
+    match HelperTrace::start(helper).await {
+        Ok(trace) => Some((trace, map)),
+        Err(error) => {
+            eprintln!(
+                "bettershot: the GNOME helper could not trace the pointer ({error}); the cursor stays in the picture"
+            );
+            None
+        }
+    }
+}
+
 #[derive(Default)]
 struct Manager {
     state: RecordingState,
     recorder: Option<Recorder>,
-    /// Samples the pointer while the system cursor is hidden (X11 sessions).
-    sampler: Option<PointerSampler>,
+    /// Follows the pointer while the system cursor is hidden.
+    sampler: Option<PointerSource>,
     session: Option<RecordingSession>,
     clock: Option<ElapsedClock>,
     timer: Option<glib::SourceId>,
@@ -168,7 +227,9 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
             p.recording_camera_device_id(),
         )
     });
+    let trace = start_helper_trace(mode).await;
     let request = RecordingRequest {
+        pointer_traced: trace.is_some(),
         mode,
         area: with(|m| m.area),
         display: display_under_pointer(),
@@ -194,10 +255,22 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
     if !warnings.is_empty() {
         app.notify("Some recording inputs are unavailable", &warnings.join(" "));
     }
-    // Port of `PointerActivityRecorder.start`: on X11 the cursor is hidden
-    // from the pixels and sampled from the recording's first frame on.
-    let sampler =
-        if recorder.pointer_synthesized() { recorder.capture_region().and_then(PointerSampler::start) } else { None };
+    // Port of `PointerActivityRecorder.start`: the cursor is hidden from the
+    // pixels and followed from the recording's first frame on, by the X11
+    // sampler or the GNOME helper's trace. A trace that is not needed after
+    // all ends when it is dropped, as the helper stops it when this
+    // connection closes.
+    let sampler = match (recorder.pointer_synthesized(), trace) {
+        (false, _) => None,
+        (true, Some((trace, map))) => recorder.capture_region().map(|region| {
+            // An area is chosen in layout points; a display's placement comes
+            // from the portal in the compositor's stage coordinates.
+            let region = if mode == SourceMode::Area { region } else { map.rect(region) };
+            trace.recording_started(region, map);
+            PointerSource::Helper(trace)
+        }),
+        (true, None) => recorder.capture_region().and_then(PointerSampler::start).map(PointerSource::X11),
+    };
     with(|m| {
         m.recorder = Some(recorder);
         m.sampler = sampler;
@@ -451,10 +524,7 @@ async fn finalize(app: &App, finished: Option<Finished>) {
     if let (Some(session), Some(finished), true) = (&session, &finished, usable) {
         let synthesized = finished.pointer_synthesized && sampler.is_some();
         let capture = match sampler {
-            Some(sampler) => {
-                let duration = finished.duration;
-                gio::spawn_blocking(move || sampler.finish(duration)).await.unwrap_or_default()
-            }
+            Some(sampler) => sampler.finish(finished.duration).await,
             None => PointerCaptureFile::default(),
         };
         let manifest = CaptureManifest {

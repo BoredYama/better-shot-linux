@@ -12,6 +12,8 @@ that section as What's New after an update.
 
 ### Added
 
+- **The BetterShot Helper for GNOME.** An optional GNOME Shell extension, installed with BetterShot, that makes captures behave as on macOS: every screen is captured silently with no flash, permission question, or screen-sharing dialog; Capture Window picks a window on a still frame and captures its own pixels even where other windows cover it, cropped to its frame; and Wayland recordings hide the system cursor so the studio can restyle it and add click effects. Log out and back in once after installing, then choose Turn On in Settings › Capture. Only the BetterShot installed in /usr/bin or /usr/local/bin can use it.
+
 - **Screenshots on Linux.** Capture an area from a still frame of the screen, every display, a window through your desktop's screenshot dialog, or the last area again, with an optional countdown. Captures stay private until you save them; new installs save region, screen, and window screenshots to `Pictures/Screenshots` automatically.
 - **The capture deck.** Each capture gets a card with Copy, Save, Edit, Pin, Share, and Dismiss. Drag a card into another app to hand over the file, or double-click it to edit. Cards hide after a few seconds unless the pointer is over them.
 - **The image editor.** Rectangles, circles, lines, arrows, freehand, numbered circles, text, highlight, pixelate, and blur, plus crop, rotate, and flip, with undo. Frame captures with gradients, colors, or images, padding, corners, shadow, and a watermark. Save keeps edits editable in the macOS `.bettershot` format and updates the saved file; Copy and Export As never change it.
@@ -40,6 +42,7 @@ that section as What's New after an update.
 
 ### Fixed
 
+- After pausing a recording made with the pointer sampled, the cursor now appears where the pointer moved during the pause, instead of staying where it was until the pointer moved again.
 - Share links saved with a capture now use the same key as the macOS app (`shareURL`), so a library shared between the two keeps them. Links saved by earlier development builds still load.
 - **Captures cover every screen with no selection step.** Region, scrolling, text, and color captures read the whole desktop through the screenshot portal again, so there is no screen-sharing dialog and any screen can be captured; GNOME flashes the screen for each shot. Settings › Capture › Read the screen through screen sharing is now an opt-in for silent captures, which makes the desktop ask which screens to share. A scrolling session that opts in keeps one stream open for all its frames.
 - **Blocked screenshots explain themselves.** When the desktop's "Allow screenshots?" question was answered Deny or closed, it refused every later capture with no message, and only window capture still worked. BetterShot now says screenshots are blocked and offers Ask Again, which forgets that stored answer and retries so the desktop asks once more; setup's Allow button does the same.

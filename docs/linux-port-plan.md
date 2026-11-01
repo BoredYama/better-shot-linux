@@ -134,6 +134,18 @@ design:
 Targets: GNOME and KDE Plasma on Wayland first, then X11 and wlroots compositors
 (Sway, Hyprland) through `xdg-desktop-portal-wlr`/`-hyprland`.
 
+On GNOME, the optional BetterShot Helper extension (`linux/gnome-extension/`)
+lifts constraints 1, 4, and 6 for the installed BetterShot: code inside GNOME
+Shell captures the whole stage with no flash or permission dialog, lists the
+windows with their positions for a window picker on the still frame,
+captures one window's own pixels, and traces the pointer during recordings.
+It serves only the program installed in `/usr/bin` or `/usr/local/bin`
+(compared by device and inode of `/proc/<pid>/exe`), writes only inside the
+user's runtime folder, and speaks a versioned D-Bus API
+(`site.bettershot.Helper`, API 1). Every caller falls back to the portal
+paths when it is missing, off, or refuses the program. `make -C linux
+check-gnome-helper` verifies it against a real headless GNOME Shell.
+
 ## Phases
 
 Each phase ends usable, with tests, and is committed and pushed separately.

@@ -24,6 +24,7 @@ mod sharing;
 mod studio;
 mod teleprompter;
 mod transfer_card;
+mod window_picker;
 
 use adw::prelude::*;
 use gtk::{gio, glib};

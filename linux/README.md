@@ -23,7 +23,7 @@ cameras, the tray, Wayland window placement, and audio output have not been
 exercised on a desktop yet, so reports from real machines are the most
 useful thing you can contribute: see [Reporting what you find](#reporting-what-you-find).
 
-[Build from source](#build-from-source) · [Install](#install) ·
+[Build from source](#build-from-source) · [Install](#install) · [GNOME Shell helper](#gnome-shell-helper) ·
 [Packages](#packages) · [Verify](#verify-a-build) · [Using it](#using-it) ·
 [Known limitations](#known-limitations) · [Layout](#layout) · [Development](#development)
 
@@ -166,11 +166,48 @@ make install PREFIX=~/.local
 
 `make install` builds the release binary if needed, then installs the
 program, the desktop entry, the AppStream metadata, the clover icons, the
-onboarding image, and the license notices under `PREFIX`, and refreshes the
-icon and desktop caches. BetterShot then appears in your app menu, and
+onboarding image, the license notices, and the GNOME Shell helper extension
+under `PREFIX`, and refreshes the icon and desktop caches. BetterShot then appears in your app menu, and
 `bettershot --help` lists every command. `make uninstall` (with the same
 `PREFIX`) removes it all; packagers set `DESTDIR` to stage into a directory
 instead.
+
+## GNOME Shell helper
+
+On GNOME, the BetterShot Helper extension makes captures behave as they do on
+macOS. Wayland keeps every app away from the screen, the window list, and the
+pointer, so without it captures go through the screenshot portal, which
+flashes the screen and asks once whether to allow screenshots. The helper runs
+inside GNOME Shell itself, where those limits don't apply, and gives
+BetterShot four things:
+
+- **Silent captures of every screen**, with no flash, no permission question,
+  and no screen-sharing dialog.
+- **A window picker on a still frame.** Capture Window dims the screen,
+  highlights the window under the pointer, and captures that window's own
+  pixels even where other windows cover it, cropped to its frame as macOS
+  does. Tab moves through the windows and Enter captures.
+- **The pointer during recordings**, so Wayland recordings hide the system
+  cursor and the studio can restyle it and add click effects, as on X11.
+- Window titles and positions for the picker, which plain Wayland apps never
+  see.
+
+`make install` and the Debian package install it with BetterShot. GNOME Shell
+only finds new extensions when it starts, so log out and back in once, then
+choose Turn On in Settings › Capture, or run:
+
+```bash
+gnome-extensions enable bettershot-helper@bettershot.site
+```
+
+Only the BetterShot program installed in `/usr/bin` or `/usr/local/bin` can
+use it. Each call compares the file the calling process runs with those
+installed files, so another app cannot pose as BetterShot, and the helper
+only writes inside your runtime folder. A development build, the AppImage, or
+the Flatpak runs from elsewhere, so the helper ignores it and captures use the
+portal as before; Settings says so. The helper is off on the lock screen, like
+every GNOME extension. It supports GNOME 45 to 50; `make check-gnome-helper`
+tests it against a real, headless GNOME Shell.
 
 ## Packages
 
@@ -443,7 +480,9 @@ leaves it unfocused, click its Copy button.
 
 **Still frames** behind region, scrolling, text, and color captures cover
 every screen with no selection step. On an X11 session they are read
-directly from the X server (silent, no dialog). On Wayland they come from
+directly from the X server (silent, no dialog). On GNOME with the
+[BetterShot Helper](#gnome-shell-helper) turned on, the helper reads them
+silently. Otherwise, on Wayland they come from
 the screenshot portal, which captures the whole desktop at once; GNOME
 flashes the screen for each shot and, the first time, asks whether to allow
 BetterShot to take screenshots, so choose Allow. Settings › Capture › Read
@@ -550,13 +589,17 @@ for example `bettershot capture region`.
 - **The capture bar appears in display recordings.** Wayland cannot keep an
   app's own windows out of a screen share, so move the bar off the recorded
   area, record a window, or stop with the tray or a shortcut.
-- **On Wayland the cursor is recorded as pixels.** GStreamer's PipeWire
+- **On Wayland the cursor is recorded as pixels**, unless the
+  [BetterShot Helper](#gnome-shell-helper) is on. GStreamer's PipeWire
   source drops the stream's cursor metadata and Wayland exposes no global
   pointer, so those recordings have no separate pointer timeline and the
   studio cannot restyle or hide the cursor or add click effects. X11
-  sessions hide the system cursor and sample the pointer, buttons, and
-  keyboard chords (never plain typing) into `input.json` instead; a card's
-  Save then renders the recording with the default look, as macOS does.
+  sessions, and GNOME with the helper, hide the system cursor and record the
+  pointer and its buttons into `input.json` instead; a card's Save then
+  renders the recording with the default look, as macOS does. Keyboard
+  captions need X11: the helper does not read the keyboard. Window
+  recordings keep the cursor in the picture, because the portal does not
+  report a window's position.
 - **The studio preview plays by stepping frames** without motion blur; the
   blur is in the exported file. Transcription needs whisper.cpp installed
   separately and runs on the CPU, and there is no subtitle editor yet.
@@ -575,10 +618,11 @@ for example `bettershot capture region`.
   nor a way to keep their own windows out of screenshots, so you choose Add
   Frame after each scroll. Auto Scroll is not available. With screen sharing
   off on GNOME, every frame flashes the screen once.
-- **Window captures use your desktop's screenshot dialog.** Wayland reports no
-  window positions to apps, so there is no way to pick a window on a still
-  frame as macOS does; the dialog (GNOME's screenshot UI, KDE's Spectacle
-  picker) is the only route.
+- **Window captures use your desktop's screenshot dialog** without the
+  [BetterShot Helper](#gnome-shell-helper). Wayland reports no window
+  positions to apps, so there is no way to pick a window on a still frame as
+  macOS does; the dialog (GNOME's screenshot UI, KDE's Spectacle picker) is
+  the only route. The helper is GNOME-only.
 - **Pins don't stay on top by themselves.** Wayland doesn't let apps keep
   windows above others; use your desktop's Always on Top (Alt+Space or
   Super+Space opens the window menu on GNOME and KDE).
@@ -612,8 +656,9 @@ for example `bettershot capture region`.
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
 | [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas, every image export, and the studio's preview and video export |
-| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, silent still frames from a ScreenCast stream, the GStreamer recorder, X11 pointer sampling, frame and audio readers, the video exporter, whisper.cpp, media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
+| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, silent still frames from a ScreenCast stream, the GNOME Shell helper client, the GStreamer recorder, X11 pointer sampling, frame and audio readers, the video exporter, whisper.cpp, media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
+| [`gnome-extension`](gnome-extension) | The BetterShot Helper GNOME Shell extension (JavaScript, GNOME 45 to 50) |
 
 ### What `bettershot-core` covers
 
@@ -684,8 +729,23 @@ options; outlines are close to, but not pixel-identical with, the macOS ink.
 make check        # fmt, clippy with warnings as errors, and tests (what CI runs)
 make run          # run a Debug build from the source tree with isolated storage
 make check-ui     # drive the real app under Xvfb with a fixture screen
+make check-gnome-helper   # the GNOME Shell helper in a real, headless GNOME Shell
 make fmt          # format the code
 ```
+
+`make check-gnome-helper` needs `gnome-shell` 46 or later (on Ubuntu,
+`sudo apt install --no-install-recommends gnome-shell`), Python with Pillow,
+and `gdbus`; it skips itself when `gnome-shell` is missing. It starts GNOME
+Shell headless on a virtual 1280x800 monitor with private session and system
+buses, enables the extension from this checkout, and checks that only listed
+programs get in, that files stay in the runtime folder, the silent
+screenshot, the window list, window captures with and without the shadow,
+and the pointer trace with motion and a click injected through Mutter's
+RemoteDesktop interface. Then it drives the app itself: a fullscreen capture,
+a dragged region, and a window picked with the pointer, which can only arrive
+through the helper because the test has no screenshot portal. It cannot
+check a real GPU, GNOME versions other than the installed one, the
+ScreenCast portal for recordings, or the lock screen.
 
 `BETTERSHOT_RENDER_SNAPSHOTS=1 cargo test -p bettershot-render --test showcase`
 writes a render of every shape and background feature to

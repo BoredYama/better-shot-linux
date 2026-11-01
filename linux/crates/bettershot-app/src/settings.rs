@@ -124,6 +124,74 @@ fn group(title: &str, description: &str) -> adw::PreferencesGroup {
     group
 }
 
+// MARK: - GNOME Shell helper
+
+/// The BetterShot Helper extension's status, shown on GNOME only, with a
+/// button to turn it on when it is installed but off.
+fn helper_group() -> adw::PreferencesGroup {
+    use bettershot_platform::gnome_helper::{self, ExtensionState, Helper, HelperError};
+    let group = group(
+        "GNOME Shell",
+        "The BetterShot Helper extension runs inside GNOME Shell, so captures need no screen flash, permission question, or screen sharing, Capture Window picks windows on a still frame, and Wayland recordings can restyle the cursor.",
+    );
+    let row = adw::ActionRow::new();
+    plain_text(&row, "BetterShot Helper extension", "Checking…");
+    let turn_on = gtk::Button::builder().label("Turn On").valign(gtk::Align::Center).visible(false).build();
+    turn_on.add_css_class("suggested-action");
+    row.add_suffix(&turn_on);
+    group.add(&row);
+    group.set_visible(false);
+
+    let refresh = {
+        let (group, row, turn_on) = (group.clone(), row.clone(), turn_on.clone());
+        move || {
+            let (group, row, turn_on) = (group.clone(), row.clone(), turn_on.clone());
+            glib::spawn_future_local(async move {
+                let state = gnome_helper::extension_state().await;
+                let subtitle = match &state {
+                    ExtensionState::NotGnome => {
+                        group.set_visible(false);
+                        return;
+                    }
+                    ExtensionState::Active => match Helper::connect().await {
+                        Err(HelperError::AccessDenied) => "On, but it only serves the BetterShot installed in /usr/bin or /usr/local/bin, and this copy runs from elsewhere.".to_owned(),
+                        Err(error) => format!("On, but it did not answer: {error}"),
+                        Ok(_) => "On. Captures are silent and Capture Window picks windows on a still frame.".to_owned(),
+                    },
+                    ExtensionState::Inactive => "Installed but off. Turn it on for silent captures and window picking.".to_owned(),
+                    ExtensionState::NeedsLogin => {
+                        "Installed. GNOME Shell finds new extensions when it starts: log out and back in, then turn it on here.".to_owned()
+                    }
+                    ExtensionState::NotInstalled => {
+                        "Not installed. It comes with BetterShot's package and with make install.".to_owned()
+                    }
+                    ExtensionState::OutOfDate => {
+                        "This GNOME version is newer than the helper supports. Update BetterShot.".to_owned()
+                    }
+                    ExtensionState::Error(detail) => format!("GNOME Shell reported an error: {detail}"),
+                };
+                row.set_subtitle(&subtitle);
+                turn_on.set_visible(state == ExtensionState::Inactive);
+                group.set_visible(true);
+            });
+        }
+    };
+    refresh();
+    let refresh = std::rc::Rc::new(refresh);
+    turn_on.connect_clicked(move |button| {
+        button.set_sensitive(false);
+        let (button, refresh) = (button.clone(), refresh.clone());
+        glib::spawn_future_local(async move {
+            if let Err(error) = gnome_helper::enable_extension().await {
+                App::get().notify_error("Couldn’t turn on the BetterShot Helper", &error);
+            }
+            button.set_sensitive(true);
+            refresh();
+        });
+    });
+    group
+}
+
 // MARK: - General
 
 fn general_page(app: &App, window: &adw::PreferencesWindow) -> adw::PreferencesPage {
@@ -345,6 +413,8 @@ fn capture_page(app: &App) -> adw::PreferencesPage {
         |active| App::get().set_pref(keys::PRESELECT_PREVIOUS_REGION, active),
     ));
     page.add(&region);
+
+    page.add(&helper_group());
 
     let reading = group(
         "Reading the screen",

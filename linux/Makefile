@@ -1,7 +1,7 @@
 # BetterShot for Linux. Run from linux/ (or `make -C linux <target>`).
 SHELL := /bin/bash -o pipefail
 
-.PHONY: help check check-ui fmt lint test build release clean install uninstall run deb appimage flatpak
+.PHONY: help check check-ui check-gnome-helper fmt lint test build release clean install uninstall run deb appimage flatpak
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -29,6 +29,9 @@ release: ## Optimized build
 check-ui: build ## Drive the app under Xvfb with a fixture screen (needs Xvfb, Openbox, xdotool, ImageMagick)
 	bash scripts/check-ui.sh
 
+check-gnome-helper: build ## Check the GNOME Shell helper extension in a headless GNOME Shell (needs gnome-shell)
+	bash scripts/check-gnome-helper.sh
+
 run: build ## Run from the source tree with isolated test storage
 	BETTERSHOT_TESTING=1 BETTERSHOT_TEST_ROOT=$(CURDIR)/target/dev-profile ./target/debug/bettershot
 
@@ -38,6 +41,7 @@ clean: ## Remove build artifacts
 PREFIX ?= /usr/local
 DESTDIR ?=
 APP_ID = site.bettershot.BetterShot
+HELPER_UUID = bettershot-helper@bettershot.site
 
 install: release ## Install to $(PREFIX) (default /usr/local)
 	install -Dm755 target/release/bettershot $(DESTDIR)$(PREFIX)/bin/bettershot
@@ -51,6 +55,10 @@ install: release ## Install to $(PREFIX) (default /usr/local)
 		install -Dm644 "$$icon" $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/$$(basename "$$icon"); \
 	done
 	install -Dm644 ../Resources/Onboarding/coast.png $(DESTDIR)$(PREFIX)/share/bettershot/onboarding/coast.png
+	@# The GNOME Shell helper; users turn it on in Settings > Capture after logging in again.
+	for file in metadata.json extension.js; do \
+		install -Dm644 gnome-extension/$(HELPER_UUID)/$$file $(DESTDIR)$(PREFIX)/share/gnome-shell/extensions/$(HELPER_UUID)/$$file; \
+	done
 	@# Scrolling capture adapts MacShot (GPLv3) and zoom planning adapts Cap (AGPLv3); their notices ship with the app.
 	install -Dm644 ../LICENSE $(DESTDIR)$(PREFIX)/share/licenses/bettershot/LICENSE
 	install -Dm644 ../Resources/Licenses/MacShot.txt $(DESTDIR)$(PREFIX)/share/licenses/bettershot/MacShot.txt
@@ -78,4 +86,5 @@ uninstall: ## Remove an installation from $(PREFIX)
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/bettershot-*-symbolic.svg
 	rm -rf $(DESTDIR)$(PREFIX)/share/licenses/bettershot
 	rm -rf $(DESTDIR)$(PREFIX)/share/bettershot
+	rm -rf $(DESTDIR)$(PREFIX)/share/gnome-shell/extensions/$(HELPER_UUID)
 	-update-desktop-database -q $(DESTDIR)$(PREFIX)/share/applications

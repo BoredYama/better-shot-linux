@@ -687,6 +687,7 @@ mod tests {
             microphone: None,
             camera: None,
             restore_token: None,
+            pointer_traced: false,
         };
         let finished = gtk::glib::MainContext::default().block_on(async {
             let (recorder, _) = Recorder::start(None, request).await.expect("recording starts");

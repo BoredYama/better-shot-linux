@@ -117,7 +117,9 @@ changes do not need README or changelog edits unless explicitly requested.
 
 [linux/](linux/) is a Rust and GTK 4 port of the app to Linux, in progress. It
 does not build with Xcode and needs no macOS tools. Run `make -C linux check`
-before submitting changes there, and `make -C linux check-ui` for UI changes;
+before submitting changes there, `make -C linux check-ui` for UI changes, and
+`make -C linux check-gnome-helper` for changes to the GNOME Shell helper in
+`linux/gnome-extension/` (it needs `gnome-shell` installed);
 see [linux/README.md](linux/README.md) and the [port plan](docs/linux-port-plan.md).
 Linux changes are recorded in [linux/CHANGELOG.md](linux/CHANGELOG.md), not the
 macOS changelog, and that file is what the Linux app's What's New shows. When you change behavior that a

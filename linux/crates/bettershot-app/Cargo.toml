@@ -47,6 +47,8 @@ recommends = "gstreamer1.0-pipewire, gstreamer1.0-plugins-bad, gstreamer1.0-plug
 suggests = "zbar-tools"
 assets = [
     ["target/release/bettershot", "usr/bin/", "755"],
+    ["../../gnome-extension/bettershot-helper@bettershot.site/metadata.json", "usr/share/gnome-shell/extensions/bettershot-helper@bettershot.site/", "644"],
+    ["../../gnome-extension/bettershot-helper@bettershot.site/extension.js", "usr/share/gnome-shell/extensions/bettershot-helper@bettershot.site/", "644"],
     ["../../data/site.bettershot.BetterShot.desktop", "usr/share/applications/", "644"],
     ["../../data/site.bettershot.BetterShot.metainfo.xml", "usr/share/metainfo/", "644"],
     ["../../data/icons/hicolor/16x16/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/16x16/apps/", "644"],

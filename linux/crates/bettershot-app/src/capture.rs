@@ -5,6 +5,7 @@
 use crate::app::App;
 use crate::{
     clipboard, color_picker, copied_hud, countdown, deck_ui, recording, recording_bar, scroll_session, selector,
+    window_picker,
 };
 use adw::prelude::*;
 use bettershot_core::app_prefs::{self, AppPreferences};
@@ -13,6 +14,7 @@ use bettershot_core::geometry::Rect;
 use bettershot_core::imaging::{self, EncodeOptions, FrozenFrame};
 use bettershot_core::shortcuts::Action;
 use bettershot_core::text_recognition;
+use bettershot_platform::gnome_helper::{Helper, HelperError};
 use bettershot_platform::screen_stream::{self, ScreenStream};
 use bettershot_platform::screenshot::{self, CaptureError};
 use bettershot_platform::x11_screen;
@@ -249,6 +251,18 @@ pub(crate) async fn frozen_screen(app: &App) -> Result<FrozenFrame, CaptureError
             Err(_) => eprintln!("bettershot: the X screen reader stopped; using the portal"),
         }
     }
+    // The BetterShot Helper GNOME Shell extension reads every screen with no
+    // flash, no dialog, and no stored permission.
+    match Helper::connect().await {
+        Ok(helper) => match helper_frozen_screen(app, &helper, &layout).await {
+            Ok(frame) => return Ok(frame),
+            Err(error) => {
+                eprintln!("bettershot: the GNOME helper could not read the screen ({error}); using the portal")
+            }
+        },
+        Err(HelperError::NotRunning) => {}
+        Err(error) => eprintln!("bettershot: the GNOME helper is unavailable ({error}); using the portal"),
+    }
     if !app.with_prefs(|p| p.capture_through_screen_share()) {
         return portal_frozen_screen(app, &layout).await;
     }
@@ -260,6 +274,22 @@ pub(crate) async fn frozen_screen(app: &App) -> Result<FrozenFrame, CaptureError
             portal_frozen_screen(app, &layout).await
         }
     }
+}
+
+/// A file for the helper to write, in the private folder under the user's
+/// runtime directory, the only place the helper writes.
+fn helper_file(app: &App, name: &str) -> Result<PathBuf, String> {
+    let directory = private_dir(app);
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    Ok(directory.join(format!("{name}-{}.png", uuid::Uuid::new_v4())))
+}
+
+async fn helper_frozen_screen(app: &App, helper: &Helper, layout: &Layout) -> Result<FrozenFrame, String> {
+    let path = helper_file(app, "helper-screen")?;
+    let written = helper.screenshot(&path).await.map_err(|e| e.to_string());
+    let frame = written.and_then(|()| frozen_frame(&path, layout));
+    let _ = std::fs::remove_file(&path);
+    frame
 }
 
 async fn portal_frozen_screen(app: &App, layout: &Layout) -> Result<FrozenFrame, CaptureError> {
@@ -388,8 +418,80 @@ async fn fullscreen(app: &App) {
     }
 }
 
-/// The desktop's own screenshot dialog, where the user picks a window.
+/// With the BetterShot Helper, picks a window on a still frame and captures
+/// its own pixels, cropped to its frame as macOS does by default. Without
+/// it, the desktop's own screenshot dialog picks the window.
 async fn window(app: &App) {
+    if !uses_fake_screen() {
+        match Helper::connect().await {
+            Ok(helper) => return helper_window(app, helper).await,
+            Err(HelperError::NotRunning) => {}
+            Err(error) => eprintln!("bettershot: the GNOME helper is unavailable ({error}); using the portal"),
+        }
+    }
+    portal_window(app).await;
+}
+
+async fn helper_window(app: &App, helper: Helper) {
+    let hidden = hide_windows(app).await;
+    countdown_if_needed(app, Action::Window).await;
+    let Some(layout) = layout() else {
+        restore_windows(hidden);
+        return report_capture_error(app, CaptureError::Failed("No display is connected.".into()), Action::Window);
+    };
+    let frame = helper_frozen_screen(app, &helper, &layout).await;
+    let windows = helper.windows().await;
+    let (frame, windows) = match (frame, windows) {
+        (Ok(frame), Ok(windows)) => (Rc::new(frame), windows),
+        (Err(error), _) => {
+            restore_windows(hidden);
+            return report_capture_error(app, CaptureError::Failed(error), Action::Window);
+        }
+        (_, Err(error)) => {
+            restore_windows(hidden);
+            return report_capture_error(app, CaptureError::Failed(error.to_string()), Action::Window);
+        }
+    };
+    let monitors: Vec<Rect> = layout.monitors.iter().map(|(_, rect)| *rect).collect();
+    let map = helper.info.stage_map(&monitors);
+    let candidates: Vec<window_picker::PickableWindow> = windows
+        .into_iter()
+        .map(|window| window_picker::PickableWindow {
+            id: window.id,
+            title: window.title,
+            rect: map.rect(window.frame),
+        })
+        .collect();
+    let picked = window_picker::pick(frame.clone(), &layout, candidates).await;
+    restore_windows(hidden);
+    let Some(picked) = picked else { return };
+    let result = match helper_file(app, "helper-window") {
+        Ok(path) => match helper.screenshot_window(picked.id, false, &path).await {
+            Ok(()) => Ok(path),
+            Err(error) => {
+                // A window the shell cannot draw on its own (one still
+                // animating, say) is cropped from the still frame instead.
+                eprintln!(
+                    "bettershot: the window could not be captured on its own ({error}); cropping the still frame"
+                );
+                let _ = std::fs::remove_file(&path);
+                let visible = picked.rect.intersection(&layout.bounds).unwrap_or(picked.rect);
+                frame
+                    .cropped(visible)
+                    .map_err(|e| CaptureError::Failed(e.to_string()))
+                    .and_then(|image| write_raw(app, &image))
+            }
+        },
+        Err(error) => Err(CaptureError::Failed(error)),
+    };
+    match result {
+        Ok(path) => process(app, &path, Action::Window),
+        Err(error) => report_capture_error(app, error, Action::Window),
+    }
+}
+
+/// The desktop's own screenshot dialog, where the user picks a window.
+async fn portal_window(app: &App) {
     let hidden = hide_windows(app).await;
     countdown_if_needed(app, Action::Window).await;
     let directory = private_dir(app);

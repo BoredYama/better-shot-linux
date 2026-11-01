@@ -27,6 +27,7 @@ pub mod release_notes;
 pub mod scroll_capture;
 pub mod share;
 pub mod shortcuts;
+pub mod stage_map;
 pub mod swift_codable;
 pub mod swift_date;
 pub mod teleprompter;

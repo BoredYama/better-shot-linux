@@ -7,8 +7,11 @@ use std::io;
 
 pub const SEEN_VERSION_KEY: &str = "bs_releaseNotesSeenVersion";
 
-/// The repository changelog, compiled into the binary.
+/// The macOS app's changelog, kept for parity tests with `ReleaseNotes.swift`.
 pub const BUNDLED_CHANGELOG: &str = include_str!("../../../../CHANGELOG.md");
+
+/// The Linux port's own changelog (`linux/CHANGELOG.md`), which the app shows.
+pub const LINUX_CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseNotes {
@@ -100,9 +103,19 @@ pub fn mark_seen(current: &str, prefs: &mut Preferences) -> io::Result<()> {
     prefs.set(SEEN_VERSION_KEY, current)
 }
 
-/// Where relative links in the changelog point (`ReleaseNotesView`'s base URL).
-pub const LINK_BASE: &str = "https://github.com/KartikLabhshetwar/better-shot/blob/main/";
-pub const ALL_NOTES_URL: &str = "https://github.com/KartikLabhshetwar/better-shot/blob/main/CHANGELOG.md";
+/// Where relative links in the Linux changelog point.
+pub const LINK_BASE: &str = "https://github.com/BoredYama/better-shot-linux/blob/main/linux/";
+pub const ALL_NOTES_URL: &str = "https://github.com/BoredYama/better-shot-linux/blob/main/linux/CHANGELOG.md";
+
+/// The `## [Unreleased]` section's body, if it has one: changes in this build
+/// that no release lists yet.
+pub fn unreleased(markdown: &str) -> Option<String> {
+    let mut lines = markdown.lines().skip_while(|line| !line.trim_end().eq_ignore_ascii_case("## [Unreleased]"));
+    lines.next()?;
+    let body: Vec<&str> = lines.take_while(|line| !line.starts_with("## ")).collect();
+    let body = body.join("\n").trim().to_owned();
+    (!body.is_empty()).then_some(body)
+}
 
 /// A block of release notes, ready for display.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +253,23 @@ mod tests {
     }
 
     #[test]
+    fn the_linux_changelog_is_well_formed() {
+        let releases = parse(LINUX_CHANGELOG);
+        let mut versions: Vec<_> = releases.iter().map(|n| n.version.clone()).collect();
+        versions.dedup();
+        assert_eq!(versions.len(), releases.len(), "changelog versions are unique");
+        let unreleased = unreleased(LINUX_CHANGELOG).expect("an Unreleased section");
+        assert!(unreleased.starts_with("### "), "{unreleased}");
+        assert!(!blocks(&unreleased).is_empty());
+        assert_eq!(unreleased_from("# C\n## [Unreleased]\n\n- a\n## [0.1.0]\n- b"), Some("- a".into()));
+        assert_eq!(unreleased_from("## [0.1.0]\n- b"), None);
+    }
+
+    fn unreleased_from(markdown: &str) -> Option<String> {
+        unreleased(markdown)
+    }
+
+    #[test]
     fn notes_become_headings_and_pango_markup() {
         let blocks = blocks(
             "### Added\n\n- **Bold** and `code` & <tags>\n- See [#12](https://x.example/12) or [docs](docs/a.md).",
@@ -254,8 +284,8 @@ mod tests {
         );
         assert_eq!(inline_markup("a [b c"), "a [b c");
         assert_eq!(inline_markup("**open"), "<b>open</b>");
-        // Every bundled release renders.
-        for release in parse(BUNDLED_CHANGELOG) {
+        // Every release in both changelogs renders.
+        for release in parse(BUNDLED_CHANGELOG).into_iter().chain(parse(LINUX_CHANGELOG)) {
             assert!(!super::blocks(&release.body).is_empty(), "{}", release.version);
         }
     }

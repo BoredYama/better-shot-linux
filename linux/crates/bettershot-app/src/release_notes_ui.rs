@@ -1,6 +1,8 @@
 //! "What's New in BetterShot", a port of `ReleaseNotesWindowController.swift`.
-//! Notes come from the bundled `CHANGELOG.md`. At launch only unread notes
-//! show; closing marks them read. Settings › About reopens the current notes.
+//! Notes come from the Linux port's own `linux/CHANGELOG.md`, compiled in. At
+//! launch only unread notes for released versions show; closing marks them
+//! read. Settings › About reopens the current release's notes, or before the
+//! first release, the Unreleased changes in this build.
 
 use crate::app::App;
 use adw::prelude::*;
@@ -16,24 +18,31 @@ thread_local! {
 /// Shows unread notes at launch; returns whether anything was shown.
 pub fn present_pending(app: &App) -> bool {
     let current = &version::APP_VERSION.version;
-    let releases = release_notes::parse(release_notes::BUNDLED_CHANGELOG);
+    let releases = release_notes::parse(release_notes::LINUX_CHANGELOG);
     let notes = release_notes::pending(&releases, current, &app.state().prefs);
     if notes.is_empty() {
         return false;
     }
-    show(app, notes, true);
+    show(app, notes, true, false);
     true
 }
 
-/// Settings › About › What's New: the current release's notes.
+/// Settings › About › What's New: the current release's notes, or the
+/// Unreleased changes when this version has no release entry yet.
 pub fn present(app: &App) {
     let current = &version::APP_VERSION.version;
     let notes: Vec<ReleaseNotes> =
-        release_notes::parse(release_notes::BUNDLED_CHANGELOG).into_iter().filter(|r| &r.version == current).collect();
-    show(app, notes, false);
+        release_notes::parse(release_notes::LINUX_CHANGELOG).into_iter().filter(|r| &r.version == current).collect();
+    if notes.is_empty() {
+        if let Some(body) = release_notes::unreleased(release_notes::LINUX_CHANGELOG) {
+            show(app, vec![ReleaseNotes { version: "Unreleased".into(), body }], false, true);
+            return;
+        }
+    }
+    show(app, notes, false, false);
 }
 
-fn show(app: &App, notes: Vec<ReleaseNotes>, marks_seen: bool) {
+fn show(app: &App, notes: Vec<ReleaseNotes>, marks_seen: bool, unreleased: bool) {
     if let Some(window) = WINDOW.with(|w| w.borrow().clone()) {
         window.present();
         return;
@@ -71,13 +80,16 @@ fn show(app: &App, notes: Vec<ReleaseNotes>, marks_seen: bool) {
     body.set_margin_bottom(18);
     body.set_margin_start(24);
     body.set_margin_end(24);
-    let note = gtk::Label::builder()
-        .label("These notes come from the macOS app. Some features are not on Linux yet.")
-        .xalign(0.0)
-        .wrap(true)
-        .css_classes(["dim-label", "caption"])
-        .build();
-    body.append(&note);
+    if unreleased {
+        body.append(
+            &gtk::Label::builder()
+                .label("Changes in this build that aren’t in a release yet.")
+                .xalign(0.0)
+                .wrap(true)
+                .css_classes(["dim-label", "caption"])
+                .build(),
+        );
+    }
     if notes.is_empty() {
         body.append(
             &gtk::Label::builder()
@@ -191,7 +203,13 @@ mod tests {
 
     #[test]
     fn every_bundled_note_is_valid_pango_markup() {
-        for release in release_notes::parse(release_notes::BUNDLED_CHANGELOG) {
+        let unreleased = release_notes::unreleased(release_notes::LINUX_CHANGELOG)
+            .map(|body| ReleaseNotes { version: "Unreleased".into(), body });
+        let releases = release_notes::parse(release_notes::BUNDLED_CHANGELOG)
+            .into_iter()
+            .chain(release_notes::parse(release_notes::LINUX_CHANGELOG))
+            .chain(unreleased);
+        for release in releases {
             for block in release_notes::blocks(&release.body) {
                 if let Block::Paragraph(markup) = block {
                     // `<a href>` is a GtkLabel extension; Pango checks the rest

@@ -126,7 +126,9 @@ to the trash stays under Cloud Shares until you delete the share.
 and global shortcuts; where screenshots go and whether they save
 automatically; and a practice capture. It resumes where you left off and never
 returns once skipped or done; Settings › About › Take the Tour reopens it.
-After an update, What's New shows the release notes once; About reopens them.
+After an update, What's New shows that release's notes from
+[CHANGELOG.md](CHANGELOG.md) once; About reopens them, or before the first
+Linux release, the Unreleased changes.
 
 **Pinned screenshots** float as borderless windows. Drag one to move it,
 scroll over it to scale it (a quarter to four times), hover for its close
@@ -162,8 +164,6 @@ for example `bettershot capture region`.
 - **Upload progress** advances per file (the capture, its poster, and the
   manifest) rather than continuously, because R2 needs each file's size up
   front. Video shares arrive with recording.
-- **Release notes** come from the macOS changelog, so they describe some
-  features Linux doesn't have yet; the window says so.
 
 - **Scrolling capture is manual.** macOS adds frames on its own as you scroll
   and auto-scrolls. Wayland gives apps neither scroll events from other apps
@@ -257,6 +257,16 @@ options; outlines are close to, but not pixel-identical with, the macOS ink.
   the library in `~/.local/share/bettershot/Library`, private working files in
   `$XDG_RUNTIME_DIR/bettershot`.
 
+## License
+
+BetterShot is under the BSD 3-Clause License ([LICENSE](../LICENSE)).
+Scrolling capture's stitching is adapted from
+[MacShot](https://github.com/sw33tLie/macshot), which is GPLv3, so
+`bettershot-core` and the `bettershot` program are `BSD-3-Clause AND
+GPL-3.0-only`; `make install` ships both notices
+([MacShot.txt](../Resources/Licenses/MacShot.txt)). The renderer and platform
+crates are BSD-3-Clause alone.
+
 ## Development
 
 ```bash
@@ -293,3 +303,5 @@ screenshot; a folder of images plays them in name order, one per screenshot.
 In testing, R2 keys come from `config/test-r2-keys.json` instead of the
 keyring, `BETTERSHOT_R2_ENDPOINT` points uploads at a local fake, and Move to
 Trash uses a private folder. The crate versions must match `version.json`; a test enforces it.
+User-facing Linux changes go under `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md); a release renames that section to its version.

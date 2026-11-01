@@ -118,7 +118,9 @@ changes do not need README or changelog edits unless explicitly requested.
 [linux/](linux/) is a Rust and GTK 4 port of the app to Linux, in progress. It
 does not build with Xcode and needs no macOS tools. Run `make -C linux check`
 before submitting changes there, and `make -C linux check-ui` for UI changes;
-see [linux/README.md](linux/README.md) and the [port plan](docs/linux-port-plan.md). When you change behavior that a
+see [linux/README.md](linux/README.md) and the [port plan](docs/linux-port-plan.md).
+Linux changes are recorded in [linux/CHANGELOG.md](linux/CHANGELOG.md), not the
+macOS changelog, and that file is what the Linux app's What's New shows. When you change behavior that a
 `bettershot-core` module ports, such as file naming or share links, update the
 module named in its header comment too.
 

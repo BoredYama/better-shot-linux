@@ -33,6 +33,8 @@ GALLERY_MENU_Y=88
 GALLERY_MENU2_X=723
 GALLERY_DELETE_Y=312
 GALLERY_CONFIRM_X=599
+# Settings › About › What's New, in window coordinates.
+ABOUT_WHATS_NEW_Y=400
 GALLERY_CONFIRM_Y=395
 
 
@@ -420,14 +422,19 @@ sys.exit(0 if s.get("bs_onboardingSeenVersion") == 2 and "bs_onboardingStep" not
 PY
       ;;
     whatsnew)
-      # An upgrade without a release-notes marker shows this version's notes once.
+      # No Linux release lists this version yet, so an upgrade shows nothing at
+      # launch; Settings › About › What's New shows the Unreleased changes.
+      [[ -z "$(window_titled '*New in BetterShot')" ]] || fail "release notes opened without a release entry"
+      settings_tab 617; sleep 0.6
+      shot "$SCENARIO-$APPEARANCE-2-about"
+      eval "$(xdotool getwindowgeometry --shell "$(xdotool search --onlyvisible --name 'BetterShot Settings' | head -1)")"
+      click_at $((X + 360)) $((Y + ABOUT_WHATS_NEW_Y)); sleep 1
       local notes; notes="$(window_titled '*New in BetterShot')"
-      [[ -n "$notes" ]] || fail "release notes did not open"
+      [[ -n "$notes" ]] || fail "What's New did not open from About"
       xdotool windowactivate --sync "$notes" 2>/dev/null || true; sleep 0.5
-      shot "$SCENARIO-$APPEARANCE-2-notes"
+      shot "$SCENARIO-$APPEARANCE-3-notes"
       xdotool key Escape; sleep 0.6
-      grep -q "\"bs_releaseNotesSeenVersion\": *\"$(python3 -c 'import json; print(json.load(open("../version.json"))["version"])')\"" \
-        "$BETTERSHOT_TEST_ROOT/config/settings.json" || fail "closing did not mark the notes read"
+      [[ -z "$(window_titled '*New in BetterShot')" ]] || fail "Escape did not close What's New"
       ;;
     hide)
       "$BIN" capture region; sleep 1.5

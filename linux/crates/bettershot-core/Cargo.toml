@@ -3,7 +3,8 @@ name = "bettershot-core"
 version = "0.5.9"
 description = "Platform-independent BetterShot models, file formats, and logic"
 edition.workspace = true
-license.workspace = true
+# Scrolling capture adapts MacShot (GPLv3); see Resources/Licenses/MacShot.txt.
+license = "BSD-3-Clause AND GPL-3.0-only"
 repository.workspace = true
 rust-version.workspace = true
 

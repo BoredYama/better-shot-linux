@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>site.bettershot.BetterShot</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>BSD-3-Clause</project_license>
+  <project_license>BSD-3-Clause AND GPL-3.0-only</project_license>
   <name>BetterShot</name>
   <summary>Capture, edit, and share your screen</summary>
   <description>

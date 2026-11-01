@@ -266,8 +266,13 @@ Decisions made while building it:
 - Onboarding's Permissions step checks the screenshot portal and global
   shortcut registration, since Linux has no Screen Recording or Accessibility
   permission. The practice image installs to `share/bettershot/onboarding`.
-- Release notes come from the macOS changelog and say so. Whether Linux gets
-  its own changelog is an open question.
+- Linux has its own changelog, `linux/CHANGELOG.md`, which the app shows;
+  the macOS `CHANGELOG.md` is unchanged. Launch shows notes only for a Linux
+  release entry matching `version.json`; About shows the Unreleased section
+  until the first release.
+- `bettershot-core` and the `bettershot` program declare
+  `BSD-3-Clause AND GPL-3.0-only` (and so does the AppStream metadata) because
+  scrolling capture adapts MacShot; render and platform stay BSD-3-Clause.
 
 ### Phase 5: Screen recording
 - Display/window/area recording via ScreenCast + GStreamer, system audio

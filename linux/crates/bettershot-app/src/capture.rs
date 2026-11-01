@@ -404,18 +404,59 @@ fn write_raw(app: &App, image: &image::RgbaImage) -> Result<PathBuf, CaptureErro
         .map_err(|e| CaptureError::Failed(format!("The capture could not be written: {e}")))
 }
 
+/// Capture Screen: one monitor is captured as is; with several, the user
+/// picks one on the still frame, as macOS captures a single display.
 async fn fullscreen(app: &App) {
     let hidden = hide_windows(app).await;
     countdown_if_needed(app, Action::Fullscreen).await;
     let result = match frozen_screen(app).await {
-        Ok(frame) => write_raw(app, &frame.image),
+        Ok(frame) => pick_screen(app, frame).await,
         Err(error) => Err(error),
     };
     restore_windows(hidden);
     match result {
-        Ok(path) => process(app, &path, Action::Fullscreen),
+        Ok(Some(path)) => process(app, &path, Action::Fullscreen),
+        Ok(None) => {}
         Err(error) => report_capture_error(app, error, Action::Fullscreen),
     }
+}
+
+/// The screen a Capture Screen shot keeps: the only one, or the one picked,
+/// cropped from the still frame at native pixel size. None when cancelled.
+async fn pick_screen(app: &App, frame: FrozenFrame) -> Result<Option<PathBuf>, CaptureError> {
+    let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
+    if layout.monitors.len() <= 1 {
+        return write_raw(app, &frame.image).map(Some);
+    }
+    let screens: Vec<window_picker::PickableWindow> = layout
+        .monitors
+        .iter()
+        .enumerate()
+        .map(|(index, (monitor, rect))| window_picker::PickableWindow {
+            id: index as u64,
+            title: screen_name(monitor, index),
+            rect: *rect,
+        })
+        .collect();
+    let frame = Rc::new(frame);
+    let Some(screen) = window_picker::pick(frame.clone(), &layout, screens, window_picker::PickerKind::Screen).await
+    else {
+        return Ok(None);
+    };
+    let image = frame.cropped(screen.rect).map_err(|e| CaptureError::Failed(e.to_string()))?;
+    write_raw(app, &image).map(Some)
+}
+
+/// A monitor's name for the picker, such as "Dell U2720Q (2560×1440)".
+fn screen_name(monitor: &gdk::Monitor, index: usize) -> String {
+    let name = monitor
+        .description()
+        .or_else(|| monitor.model())
+        .map(|name| name.to_string())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| format!("Screen {}", index + 1));
+    let geometry = monitor.geometry();
+    format!("{name} ({}×{})", geometry.width(), geometry.height())
 }
 
 /// With the BetterShot Helper, picks a window on a still frame and captures
@@ -462,7 +503,7 @@ async fn helper_window(app: &App, helper: Helper) {
             rect: map.rect(window.frame),
         })
         .collect();
-    let picked = window_picker::pick(frame.clone(), &layout, candidates).await;
+    let picked = window_picker::pick(frame.clone(), &layout, candidates, window_picker::PickerKind::Window).await;
     restore_windows(hidden);
     let Some(picked) = picked else { return };
     let result = match helper_file(app, "helper-window") {

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks the BetterShot Helper GNOME Shell extension against a real, headless
-# GNOME Shell: a virtual 1280x800 monitor, a private session bus, a private
-# system bus (the shell's login manager needs one), and the extension enabled
-# from this checkout. It drives every helper method with gdbus, confirms that
+# GNOME Shell with a private session bus, a private system bus (the shell's
+# login manager needs one), and the extension enabled from this checkout. The
+# first run uses one virtual 1280x800 monitor; a second run adds a 1024x768
+# monitor to check Capture Screen's screen picker. It drives every helper method with gdbus, confirms that
 # an unlisted program is refused, opens a real BetterShot window to list and
 # capture, and runs the Rust client's integration test, which injects
 # pointer input through Mutter's RemoteDesktop interface to check the pointer
@@ -43,8 +44,12 @@ enabled-extensions=['$UUID']
 disable-user-extensions=false
 EOF
   export WORK RUN CLIENT_TEST HERE
-  dbus-run-session -- bash "$0" --inside
-  exit $?
+  # One monitor for the helper's API and the app's captures, then two for
+  # Capture Screen's screen picker, each in a fresh shell.
+  MODE=single dbus-run-session -- bash "$0" --inside
+  MODE=screens dbus-run-session -- bash "$0" --inside
+  echo "All helper checks passed."
+  exit 0
 fi
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -71,7 +76,9 @@ export DBUS_SYSTEM_BUS_ADDRESS="unix:abstract=$SYSTEM_BUS"
 # development build under test.
 ALLOWED="/usr/bin/gdbus:$HERE/target/debug/bettershot"
 [[ -n "$CLIENT_TEST" ]] && ALLOWED="$ALLOWED:$CLIENT_TEST"
-BETTERSHOT_HELPER_ALLOWED_PATHS="$ALLOWED" gnome-shell --headless --virtual-monitor 1280x800 --wayland --no-x11 \
+MONITORS=(--virtual-monitor 1280x800)
+[[ "$MODE" == screens ]] && MONITORS+=(--virtual-monitor 1024x768)
+BETTERSHOT_HELPER_ALLOWED_PATHS="$ALLOWED" gnome-shell --headless "${MONITORS[@]}" --wayland --no-x11 \
   > "$WORK/shell.log" 2>&1 &
 SHELL_PID=$!
 APP_PID=""
@@ -88,7 +95,40 @@ png_size() { python3 -c "from PIL import Image; import sys; print('%dx%d' % Imag
 
 for _ in $(seq 1 60); do has_owner site.bettershot.Helper && break; sleep 0.5; done
 has_owner site.bettershot.Helper || { grep -iE "error|bettershot" "$WORK/shell.log" | head -20 >&2; fail "the extension did not start"; }
-pass "the extension owns site.bettershot.Helper"
+[[ "$MODE" == single ]] && pass "the extension owns site.bettershot.Helper"
+
+# The app's test profile lives in the runtime folder, because the helper
+# only writes there; it saves captures automatically and captures a region
+# as soon as the drag ends, so the client test can drive it with the pointer.
+APP_ROOT="$RUN/app-$MODE"
+mkdir -p "$APP_ROOT/config"
+cat > "$APP_ROOT/config/settings.json" <<EOF
+{"afterCapture.screenshot.save": true, "bs_captureRegionOnRelease": true, "bs_playSound": false,
+ "bs_onboardingSeenVersion": 2, "bs_releaseNotesSeenVersion": "99.0.0"}
+EOF
+export WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland
+[[ -n "$CLIENT_TEST" ]] || fail "the Rust client test (crates/bettershot-platform/tests/gnome_helper.rs) did not build"
+client_test() {
+  if ! RUST_BACKTRACE=0 BETTERSHOT_HELPER_TEST="$1" BETTERSHOT_HELPER_APP="$HERE/target/debug/bettershot" \
+    BETTERSHOT_HELPER_APP_ROOT="$APP_ROOT" "$CLIENT_TEST" --nocapture --test-threads=1 > "$WORK/client-$1.log" 2>&1; then
+    tail -40 "$WORK/client-$1.log" >&2
+    echo "--- app log" >&2; tail -20 "$WORK/app.log" >&2
+    echo "--- app files" >&2; find "$APP_ROOT" -type f -not -path "*/runtime/*" 2>/dev/null | head -20 >&2
+    fail "the Rust client test ($1) failed"
+  fi
+}
+
+if [[ "$MODE" == screens ]]; then
+  BETTERSHOT_TESTING=1 BETTERSHOT_TEST_ROOT="$APP_ROOT" "$HERE/target/debug/bettershot" > "$WORK/app.log" 2>&1 &
+  APP_PID=$!
+  client_test screens
+  pass "Capture Screen on two monitors captures the one picked"
+  if grep -E "JS ERROR|bettershot-helper" "$WORK/shell.log" | grep -v "Gio.IOErrorEnum: Could not connect" | grep -q .; then
+    grep -E "JS ERROR|bettershot-helper" "$WORK/shell.log" | head -10 >&2
+    fail "GNOME Shell logged errors from the extension"
+  fi
+  exit 0
+fi
 
 INFO="$(helper GetInfo)"
 [[ "$INFO" == *"'api': <uint32 1>"* ]] || fail "GetInfo: $INFO"
@@ -114,27 +154,9 @@ pass "files outside the runtime folder are refused"
 # the shadow), and a pointer trace with motion and a click it injects through
 # Mutter's RemoteDesktop interface, which lives only as long as one
 # connection, so gdbus calls cannot drive it.
-# The app's test profile lives in the runtime folder, because the helper
-# only writes there; it saves captures automatically and captures a region
-# as soon as the drag ends, so the client test can drive it with the pointer.
-APP_ROOT="$RUN/app"
-mkdir -p "$APP_ROOT/config"
-cat > "$APP_ROOT/config/settings.json" <<EOF
-{"afterCapture.screenshot.save": true, "bs_captureRegionOnRelease": true, "bs_playSound": false,
- "bs_onboardingSeenVersion": 2, "bs_releaseNotesSeenVersion": "99.0.0"}
-EOF
-export WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland
 BETTERSHOT_TESTING=1 BETTERSHOT_TEST_ROOT="$APP_ROOT" "$HERE/target/debug/bettershot" > "$WORK/app.log" 2>&1 &
 APP_PID=$!
-
-[[ -n "$CLIENT_TEST" ]] || fail "the Rust client test (crates/bettershot-platform/tests/gnome_helper.rs) did not build"
-if ! RUST_BACKTRACE=0 BETTERSHOT_HELPER_TEST=1 BETTERSHOT_HELPER_APP="$HERE/target/debug/bettershot" \
-  BETTERSHOT_HELPER_APP_ROOT="$APP_ROOT" "$CLIENT_TEST" --nocapture --test-threads=1 > "$WORK/client.log" 2>&1; then
-  tail -40 "$WORK/client.log" >&2
-  echo "--- app log" >&2; tail -20 "$WORK/app.log" >&2
-  echo "--- app files" >&2; find "$APP_ROOT" -type f -not -path "*/runtime/*" 2>/dev/null | head -20 >&2
-  fail "the Rust client test failed"
-fi
+client_test 1
 pass "the Rust client lists and captures windows and traces the pointer"
 pass "BetterShot captures the screen, a dragged region, and a picked window through the helper"
 
@@ -143,4 +165,3 @@ if grep -E "JS ERROR|bettershot-helper" "$WORK/shell.log" | grep -v "Gio.IOError
   fail "GNOME Shell logged errors from the extension"
 fi
 pass "GNOME Shell logged no extension errors"
-echo "All helper checks passed."

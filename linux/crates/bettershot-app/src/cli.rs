@@ -30,7 +30,7 @@ pub enum Command {
 /// Capture subcommands, their actions, and help text.
 pub const CAPTURE_COMMANDS: &[(&str, Action, &str)] = &[
     ("region", Action::Region, "Select an area and capture it"),
-    ("fullscreen", Action::Fullscreen, "Capture every display"),
+    ("fullscreen", Action::Fullscreen, "Capture a screen (with several, pick one)"),
     ("window", Action::Window, "Choose a window in the desktop's screenshot dialog"),
     ("previous-region", Action::PreviousRegion, "Capture the last selected area again"),
     ("timed-region", Action::TimedRegion, "Select an area after a countdown"),

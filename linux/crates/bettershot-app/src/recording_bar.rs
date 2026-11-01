@@ -182,7 +182,7 @@ fn build(app: &App) -> Bar {
     picker.add_css_class("picker-row");
     let capture_items: [(&str, &str, &str, Action); 6] = [
         ("bettershot-region-symbolic", "Region", "Capture an area", Action::Region),
-        ("video-display-symbolic", "Screen", "Capture every display", Action::Fullscreen),
+        ("video-display-symbolic", "Screen", "Capture a screen", Action::Fullscreen),
         ("window-new-symbolic", "Window", "Capture a window", Action::Window),
         ("view-continuous-symbolic", "Scroll", "Scrolling capture", Action::ScrollCapture),
         ("insert-text-symbolic", "Text", "Capture text", Action::Ocr),

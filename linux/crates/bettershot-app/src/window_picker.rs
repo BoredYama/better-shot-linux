@@ -1,11 +1,12 @@
-//! Picks a window on a still frame of the desktop, the counterpart of
-//! macOS's window selector (`screencapture -i -w`).
+//! Picks a window or a screen on a still frame of the desktop: the
+//! counterpart of macOS's window selector (`screencapture -i -w`), and the
+//! screen choice for Capture Screen on several monitors.
 //!
-//! It needs the BetterShot Helper GNOME Shell extension, which lists the
-//! windows with their positions; plain Wayland gives apps neither. Each
-//! monitor shows the frozen frame dimmed, except the window under the
+//! Windows need the BetterShot Helper GNOME Shell extension, which lists
+//! them with their positions; plain Wayland gives apps neither. Each monitor
+//! shows the frozen frame dimmed, except the window or screen under the
 //! pointer, which is outlined like the region selector's selection. Click or
-//! press Enter to capture it, Tab and Shift+Tab move through the windows,
+//! press Enter to capture it, Tab and Shift+Tab move through the targets,
 //! and Escape cancels.
 
 use crate::capture::Layout;
@@ -18,9 +19,45 @@ use std::rc::Rc;
 
 /// The region selector's dim level, so both selectors look alike.
 const DIM: f64 = 0.45;
-const IDLE_HINT: &str = "Point at a window, or press Tab · Esc to cancel";
 
-/// A window to offer, in layout points.
+/// What is being picked, which sets the wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerKind {
+    Window,
+    Screen,
+}
+
+impl PickerKind {
+    fn idle_hint(self) -> &'static str {
+        match self {
+            Self::Window => "Point at a window, or press Tab · Esc to cancel",
+            Self::Screen => "Point at a screen, or press Tab · Esc to cancel",
+        }
+    }
+
+    fn untitled(self) -> &'static str {
+        match self {
+            Self::Window => "Untitled window",
+            Self::Screen => "Screen",
+        }
+    }
+
+    fn accessible_label(self) -> &'static str {
+        match self {
+            Self::Window => "Window picker",
+            Self::Screen => "Screen picker",
+        }
+    }
+
+    fn window_title(self) -> &'static str {
+        match self {
+            Self::Window => "Pick a window",
+            Self::Screen => "Pick a screen",
+        }
+    }
+}
+
+/// A window or screen to offer, in layout points.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickableWindow {
     pub id: u64,
@@ -29,6 +66,7 @@ pub struct PickableWindow {
 }
 
 struct Shared {
+    kind: PickerKind,
     /// Topmost first, so the first one under the pointer is the visible one.
     windows: Vec<PickableWindow>,
     hovered: Option<usize>,
@@ -41,11 +79,17 @@ struct Shared {
 
 type SharedRef = Rc<RefCell<Shared>>;
 
-/// Lets the user pick one of `windows` over `frame`. Resolves to the window,
-/// or None when cancelled.
-pub async fn pick(frame: Rc<FrozenFrame>, layout: &Layout, windows: Vec<PickableWindow>) -> Option<PickableWindow> {
+/// Lets the user pick one of `windows` (windows or screens, per `kind`)
+/// over `frame`. Resolves to the pick, or None when cancelled.
+pub async fn pick(
+    frame: Rc<FrozenFrame>,
+    layout: &Layout,
+    windows: Vec<PickableWindow>,
+    kind: PickerKind,
+) -> Option<PickableWindow> {
     let (sender, receiver) = async_channel::bounded(1);
     let shared: SharedRef = Rc::new(RefCell::new(Shared {
+        kind,
         windows,
         hovered: None,
         monitors: layout.monitors.iter().map(|(_, rect)| *rect).collect(),
@@ -76,10 +120,10 @@ fn set_hovered(shared: &SharedRef, hovered: Option<usize>) {
     let state = shared.borrow();
     let hint = match hovered.and_then(|index| state.windows.get(index)) {
         Some(window) => {
-            let title = if window.title.trim().is_empty() { "Untitled window" } else { window.title.trim() };
+            let title = if window.title.trim().is_empty() { state.kind.untitled() } else { window.title.trim() };
             format!("{title} · Click or press Enter to capture · Esc to cancel")
         }
-        None => IDLE_HINT.to_owned(),
+        None => state.kind.idle_hint().to_owned(),
     };
     for label in &state.hints {
         label.set_label(&hint);
@@ -91,6 +135,7 @@ fn set_hovered(shared: &SharedRef, hovered: Option<usize>) {
 }
 
 fn build_window(shared: &SharedRef, frame: &FrozenFrame, index: usize, monitor: &gdk::Monitor, rect: Rect) {
+    let kind = shared.borrow().kind;
     let picture = gtk::Picture::new();
     picture.set_content_fit(gtk::ContentFit::Fill);
     picture.set_can_shrink(true);
@@ -114,11 +159,11 @@ fn build_window(shared: &SharedRef, frame: &FrozenFrame, index: usize, monitor: 
     area.set_focusable(true);
     area.set_accessible_role(gtk::AccessibleRole::Application);
     area.update_property(&[
-        gtk::accessible::Property::Label("Window picker"),
-        gtk::accessible::Property::Description(IDLE_HINT),
+        gtk::accessible::Property::Label(kind.accessible_label()),
+        gtk::accessible::Property::Description(kind.idle_hint()),
     ]);
     let hint = gtk::Label::builder()
-        .label(IDLE_HINT)
+        .label(kind.idle_hint())
         .css_classes(["selector-hint"])
         .halign(gtk::Align::Center)
         .valign(gtk::Align::End)
@@ -133,20 +178,27 @@ fn build_window(shared: &SharedRef, frame: &FrozenFrame, index: usize, monitor: 
     overlay.add_overlay(&area);
     overlay.add_overlay(&hint);
 
-    let window = gtk::Window::builder().title("Pick a window").decorated(false).child(&overlay).build();
+    let window = gtk::Window::builder().title(kind.window_title()).decorated(false).child(&overlay).build();
     window.add_css_class("region-selector");
     window.fullscreen_on_monitor(monitor);
 
     let draw_shared = shared.clone();
     area.set_draw_func(move |_, cr, width, height| draw(&draw_shared, index, cr, f64::from(width), f64::from(height)));
 
+    // The pointer is usually already over a monitor when the picker opens,
+    // so entering counts as much as moving.
     let motion = gtk::EventControllerMotion::new();
-    let motion_shared = shared.clone();
-    motion.connect_motion(move |_, x, y| {
-        let point = Point::new(rect.x + x, rect.y + y);
-        let hovered = window_at(&motion_shared.borrow(), point);
-        set_hovered(&motion_shared, hovered);
-    });
+    let hover = {
+        let shared = shared.clone();
+        move |x: f64, y: f64| {
+            let point = Point::new(rect.x + x, rect.y + y);
+            let hovered = window_at(&shared.borrow(), point);
+            set_hovered(&shared, hovered);
+        }
+    };
+    let on_enter = hover.clone();
+    motion.connect_enter(move |_, x, y| on_enter(x, y));
+    motion.connect_motion(move |_, x, y| hover(x, y));
     area.add_controller(motion);
 
     let click = gtk::GestureClick::new();

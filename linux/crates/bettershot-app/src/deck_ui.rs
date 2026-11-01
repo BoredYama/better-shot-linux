@@ -24,8 +24,30 @@ use std::time::Duration;
 
 struct Deck {
     window: gtk::Window,
+    /// Scrolls the cards once they are taller than the screen.
+    scroller: gtk::ScrolledWindow,
     list: gtk::Box,
     cards: Vec<Card>,
+}
+
+/// The deck keeps at most this many cards, as macOS does
+/// (`PreviewOverlay.maxItems`); the oldest idle card leaves first.
+const MAX_CARDS: usize = 5;
+/// Room left above and below the deck on its screen (the top bar and a margin).
+const SCREEN_MARGIN: i32 = 120;
+
+/// Caps the deck at its screen's height, so older cards scroll instead of
+/// running off the screen.
+fn fit_to_screen(deck: &Deck) {
+    let Some(display) = gdk::Display::default() else { return };
+    let monitor = deck
+        .window
+        .surface()
+        .and_then(|surface| display.monitor_at_surface(&surface))
+        .or_else(|| display.monitors().item(0).and_downcast::<gdk::Monitor>());
+    if let Some(monitor) = monitor {
+        deck.scroller.set_max_content_height((monitor.geometry().height() - SCREEN_MARGIN).max(200));
+    }
 }
 
 thread_local! {
@@ -57,8 +79,20 @@ pub fn show(app: &App, processed: &ProcessedCapture) -> Card {
         let deck = deck.get_or_insert_with(build_deck);
         deck.list.prepend(&card.0.root);
         deck.cards.insert(0, card.clone());
+        fit_to_screen(deck);
         deck.window.present();
     });
+    // Beyond the limit, the oldest cards without an upload in progress go,
+    // dismissed outside the borrow because dismissing edits the deck.
+    let evicted: Vec<Card> = DECK.with(|deck| {
+        let deck = deck.borrow();
+        let Some(deck) = deck.as_ref() else { return Vec::new() };
+        let extra = deck.cards.len().saturating_sub(MAX_CARDS);
+        deck.cards.iter().rev().filter(|card| card.0.upload.borrow().is_none()).take(extra).cloned().collect()
+    });
+    for old in evicted {
+        old.dismiss();
+    }
     card.schedule_hide(app);
     card
 }
@@ -103,8 +137,15 @@ fn build_deck() -> Deck {
     list.set_margin_bottom(10);
     list.set_margin_start(10);
     list.set_margin_end(10);
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
+        .child(&list)
+        .build();
     let handle = gtk::WindowHandle::new();
-    handle.set_child(Some(&list));
+    handle.set_child(Some(&scroller));
     let window = gtk::Window::builder()
         .title("Captures")
         .application(&App::get().application)
@@ -132,7 +173,7 @@ fn build_deck() -> Deck {
         }
         glib::Propagation::Stop
     });
-    Deck { window, list, cards: Vec::new() }
+    Deck { window, scroller, list, cards: Vec::new() }
 }
 
 fn slot_alignment(slot: OverlayToolSlot) -> (gtk::Align, gtk::Align) {

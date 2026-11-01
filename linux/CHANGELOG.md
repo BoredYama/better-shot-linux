@@ -12,10 +12,10 @@ that section as What's New after an update.
 
 ### Added
 
+- **Pick the screen for Capture Screen.** With several monitors, Capture Screen shows a still frame of every screen and captures the one you click (or choose with Tab and Enter), as the macOS app captures a single display. One monitor is captured at once, as before.
 - **The BetterShot Helper for GNOME.** An optional GNOME Shell extension, installed with BetterShot, that makes captures behave as on macOS: every screen is captured silently with no flash, permission question, or screen-sharing dialog; Capture Window picks a window on a still frame and captures its own pixels even where other windows cover it, cropped to its frame; and Wayland recordings hide the system cursor so the studio can restyle it and add click effects. Log out and back in once after installing, then choose Turn On in Settings › Capture. Only the BetterShot installed in /usr/bin or /usr/local/bin can use it.
-
-- **Screenshots on Linux.** Capture an area from a still frame of the screen, every display, a window through your desktop's screenshot dialog, or the last area again, with an optional countdown. Captures stay private until you save them; new installs save region, screen, and window screenshots to `Pictures/Screenshots` automatically.
-- **The capture deck.** Each capture gets a card with Copy, Save, Edit, Pin, Share, and Dismiss. Drag a card into another app to hand over the file, or double-click it to edit. Cards hide after a few seconds unless the pointer is over them.
+- **Screenshots on Linux.** Capture an area from a still frame of the screen, a whole screen, a window through your desktop's screenshot dialog, or the last area again, with an optional countdown. Captures stay private until you save them; new installs save region, screen, and window screenshots to `Pictures/Screenshots` automatically.
+- **The capture deck.** Each capture gets a card with Copy, Save, Edit, Pin, Share, and Dismiss. Drag a card into another app to hand over the file, or double-click it to edit. The deck holds up to five cards and scrolls when they are taller than the screen.
 - **The image editor.** Rectangles, circles, lines, arrows, freehand, numbered circles, text, highlight, pixelate, and blur, plus crop, rotate, and flip, with undo. Frame captures with gradients, colors, or images, padding, corners, shadow, and a watermark. Save keeps edits editable in the macOS `.bettershot` format and updates the saved file; Copy and Export As never change it.
 - **Capture Text and Pick Color.** Drag over text to copy it, using Tesseract, with QR codes read first when `zbarimg` is installed; an area without text leaves the clipboard alone. Pick Color uses your desktop's color picker, or a magnifier where the desktop has none, and copies `#RRGGBB`.
 - **Smart Redaction.** The editor finds email addresses, links, IP addresses, phone and card numbers, tokens, and labeled secrets, and covers them with Pixelate or Blur in one step.
@@ -38,10 +38,11 @@ that section as What's New after an update.
 
 ### Changed
 
-- **Capture cards are Large by default.** The macOS default, Small, is a 180-point card, which is hard to read on the 1x displays most Linux desktops use. Settings › Cards › Card size still offers Small and Medium, and a size chosen earlier is kept.
+- **Capture cards stay until you dismiss them, and are larger.** A card now stays on screen until you choose Dismiss or press Escape while the deck is active, instead of hiding after five seconds; Settings › Capture Deck › Hide after still sets a delay. Cards are Extra Large by default, a new size 1.5 times the macOS app's Large, because a 180-point card is hard to read on the 1x displays most Linux desktops use. Card size still offers Small, Medium, and Large, and a size chosen earlier is kept.
 
 ### Fixed
 
+- Choosing a capture from the tray menu now waits for the menu to close, so the menu no longer appears in the still frame or stays over the selector.
 - After pausing a recording made with the pointer sampled, the cursor now appears where the pointer moved during the pause, instead of staying where it was until the pointer moved again.
 - Share links saved with a capture now use the same key as the macOS app (`shareURL`), so a library shared between the two keeps them. Links saved by earlier development builds still load.
 - **Captures cover every screen with no selection step.** Region, scrolling, text, and color captures read the whole desktop through the screenshot portal again, so there is no screen-sharing dialog and any screen can be captured; GNOME flashes the screen for each shot. Settings › Capture › Read the screen through screen sharing is now an opt-in for silent captures, which makes the desktop ask which screens to share. A scrolling session that opts in keeps one stream open for all its frames.

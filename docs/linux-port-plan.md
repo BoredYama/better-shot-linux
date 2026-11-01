@@ -159,7 +159,7 @@ Each phase ends usable, with tests, and is committed and pushed separately.
 - Port standalone checks: file naming, URL actions, region geometry, overlay
   layout, release notes parsing, R2 endpoint/SigV4, onboarding state.
 
-Delivered in `linux/crates/bettershot-core` (see `linux/README.md`). Decisions
+Delivered in `linux/crates/bettershot-core` (see the repository `README.md`). Decisions
 made along the way:
 
 - Global shortcut defaults map ⌘ to Super (`⌘⇧4` → Super+Shift+4); editor

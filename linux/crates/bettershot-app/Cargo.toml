@@ -61,5 +61,5 @@ assets = [
     ["../../../Resources/Onboarding/coast.png", "usr/share/bettershot/onboarding/", "644"],
     ["../../../Resources/Licenses/MacShot.txt", "usr/share/doc/bettershot/", "644"],
     ["../../../Resources/Licenses/Cap.txt", "usr/share/doc/bettershot/", "644"],
-    ["../../README.md", "usr/share/doc/bettershot/README.md", "644"],
+    ["../../../README.md", "usr/share/doc/bettershot/README.md", "644"],
 ]

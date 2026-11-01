@@ -248,3 +248,74 @@ fn frame_of(text: &str, title: &str) -> Option<(f64, f64, f64, f64)> {
     let numbers: Vec<f64> = after[..after.find(')')?].split(',').filter_map(|n| n.trim().parse().ok()).collect();
     (numbers.len() == 4).then(|| (numbers[0], numbers[1], numbers[2], numbers[3]))
 }
+
+/// Where the pointer is now, in stage coordinates, read from a brief trace.
+async fn pointer_position(helper: &Helper) -> (f64, f64) {
+    helper.start_pointer_trace().await.expect("a trace starts");
+    glib::timeout_future(Duration::from_millis(60)).await;
+    let samples = helper.stop_pointer_trace().await.expect("the trace ends");
+    let last = samples.last().expect("the trace records the pointer");
+    (last.x, last.y)
+}
+
+/// With two monitors, Capture Screen shows the screen picker; clicking the
+/// second monitor saves exactly that monitor. Run with
+/// BETTERSHOT_HELPER_TEST=screens by the check script's two-monitor pass.
+#[test]
+fn the_app_picks_a_screen() {
+    if std::env::var("BETTERSHOT_HELPER_TEST").as_deref() != Ok("screens") {
+        eprintln!("skipped: run through scripts/check-gnome-helper.sh");
+        return;
+    }
+    let app = std::env::var("BETTERSHOT_HELPER_APP").expect("the app to drive");
+    let root = PathBuf::from(std::env::var("BETTERSHOT_HELPER_APP_ROOT").expect("the app's test profile"));
+    glib::MainContext::default().block_on(async {
+        let helper = Helper::connect().await.expect("the helper lets this test in");
+        assert_eq!(helper.info.monitors.len(), 2, "{:?}", helper.info.monitors);
+        let (second, _) =
+            *helper.info.monitors.iter().find(|(rect, _)| rect.x != 0.0 || rect.y != 0.0).expect("a second monitor");
+
+        let connection = Connection::session().await.unwrap();
+        let input = Input::new(&connection).await;
+        input.key(ESCAPE).await;
+        glib::timeout_future(Duration::from_millis(800)).await;
+
+        let saved = root.join("Pictures/Screenshots");
+        let count = || std::fs::read_dir(&saved).map(|d| d.count()).unwrap_or(0);
+        let before = count();
+        let status = std::process::Command::new(&app)
+            .args(["capture", "fullscreen"])
+            .env("BETTERSHOT_TESTING", "1")
+            .env("BETTERSHOT_TEST_ROOT", &root)
+            .status()
+            .expect("bettershot runs");
+        assert!(status.success());
+        glib::timeout_future(Duration::from_millis(1500)).await;
+        assert_eq!(count(), before, "with two monitors nothing is saved until a screen is picked");
+
+        // Move the way a mouse does, in a stream of steps, not one jump.
+        let (x, y) = pointer_position(&helper).await;
+        let steps = 12.0;
+        for _ in 0..12 {
+            input.moved((second.mid_x() - x) / steps, (second.mid_y() - y) / steps).await;
+            glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        glib::timeout_future(Duration::from_millis(200)).await;
+        input.button(true).await;
+        input.button(false).await;
+        let mut capture = None;
+        for _ in 0..60 {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(&saved)
+                .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+                .unwrap_or_default();
+            files.sort();
+            if files.len() > before {
+                capture = files.last().cloned();
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+        let capture = capture.expect("the picked screen was saved");
+        assert_eq!(png_size(&capture), (second.width as u32, second.height as u32), "only the picked monitor");
+    });
+}

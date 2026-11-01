@@ -127,6 +127,9 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
     entries
 }
 
+/// How long a tray menu takes to close (GNOME's popup animation is 150 ms).
+const TRAY_MENU_CLOSE: std::time::Duration = std::time::Duration::from_millis(300);
+
 pub fn start_tray(app: &App) {
     if !app.with_prefs(|p| p.show_tray_icon()) || app.state().tray.is_some() {
         return;
@@ -143,7 +146,12 @@ pub fn start_tray(app: &App) {
     glib::spawn_future_local(async move {
         while let Ok(command) = receiver.recv().await {
             match command {
-                TrayCommand::Capture(action) => capture::perform(action),
+                // GNOME's tray menu animates closed after a click; a capture
+                // started at once would freeze the screen with the menu still
+                // on it, so it waits until the menu is gone.
+                TrayCommand::Capture(action) => {
+                    glib::timeout_add_local_once(TRAY_MENU_CLOSE, move || capture::perform(action));
+                }
                 TrayCommand::OpenSettings => settings::present(&App::get()),
                 TrayCommand::OpenImage => crate::editor::open_file_dialog(&App::get()),
                 TrayCommand::OpenGallery => crate::gallery::present(&App::get()),

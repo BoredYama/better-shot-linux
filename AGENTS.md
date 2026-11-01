@@ -216,7 +216,8 @@ a PR unless explicitly requested.
   prove: real portals, PipeWire, PulseAudio, cameras, the tray, Wayland
   placement, and audio output.
 - Record user-facing changes under `## [Unreleased]` in `linux/CHANGELOG.md`,
-  and keep `linux/README.md`, `docs/linux-port-plan.md`, and
+  and keep the repository `README.md` (the Linux README; the macOS one is
+  `README.macos.md`), `docs/linux-port-plan.md`, and
   `HANDOFF.better-shot.md` current.
 
 ## Website-only rules

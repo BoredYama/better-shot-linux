@@ -110,16 +110,19 @@ pub enum OverlayCardSize {
     Small,
     Medium,
     Large,
+    /// Linux only: 1.5 times Large, the Linux default, for 1x displays.
+    ExtraLarge,
 }
 
 impl OverlayCardSize {
-    pub const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+    pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::ExtraLarge];
 
     pub fn raw_value(self) -> &'static str {
         match self {
             Self::Small => "small",
             Self::Medium => "medium",
             Self::Large => "large",
+            Self::ExtraLarge => "extraLarge",
         }
     }
 
@@ -128,15 +131,17 @@ impl OverlayCardSize {
             Self::Small => "Small",
             Self::Medium => "Medium",
             Self::Large => "Large",
+            Self::ExtraLarge => "Extra Large",
         }
     }
 
-    /// The card's thumbnail area in points.
+    /// The card's thumbnail area in points; the first three match macOS.
     pub fn thumbnail_size(self) -> (i32, i32) {
         match self {
             Self::Small => (180, 130),
             Self::Medium => (240, 172),
             Self::Large => (300, 216),
+            Self::ExtraLarge => (450, 324),
         }
     }
 }
@@ -185,12 +190,14 @@ impl AppPreferences<'_> {
     }
 
     /// Seconds before an idle card hides; see [`AppPreferences::overlay_dismisses`].
+    /// macOS hides cards after 5 seconds by default; on Linux an unset
+    /// preference means never, so a card stays until Dismiss or Escape.
     pub fn overlay_dismiss_delay(&self) -> f64 {
         let value = self.prefs.double(keys::OVERLAY_DISMISS_DELAY);
         if value > 0.0 {
             value
         } else {
-            5.0
+            OVERLAY_DISMISS_NEVER
         }
     }
 
@@ -200,10 +207,10 @@ impl AppPreferences<'_> {
 
     /// The capture card's size. macOS defaults to Small; Linux desktops run
     /// at 1x far more often, where a 180-point card is hard to read, so an
-    /// unset preference means Large here.
+    /// unset preference means Extra Large here.
     pub fn overlay_card_size(&self) -> OverlayCardSize {
         let raw = self.prefs.string(keys::OVERLAY_CARD_SIZE).unwrap_or_default();
-        OverlayCardSize::ALL.into_iter().find(|s| s.raw_value() == raw).unwrap_or(OverlayCardSize::Large)
+        OverlayCardSize::ALL.into_iter().find(|s| s.raw_value() == raw).unwrap_or(OverlayCardSize::ExtraLarge)
     }
 
     pub fn overlay_tool_layout(&self) -> OverlayToolLayout {
@@ -360,14 +367,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cards_default_to_large_on_linux_and_honor_the_shared_key() {
+    fn cards_default_to_extra_large_and_stay_on_linux() {
         let dirs = AppDirs::resolve(|_| None);
         let mut prefs = Preferences::in_memory();
-        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Large);
+        let app = |prefs: &Preferences| AppPreferences { prefs, dirs: &dirs }.overlay_card_size();
+        assert_eq!(app(&prefs), OverlayCardSize::ExtraLarge);
+        assert_eq!(OverlayCardSize::ExtraLarge.thumbnail_size(), (450, 324), "1.5 times Large");
         prefs.set(keys::OVERLAY_CARD_SIZE, "small").unwrap();
-        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Small);
+        assert_eq!(app(&prefs), OverlayCardSize::Small);
+        prefs.set(keys::OVERLAY_CARD_SIZE, "large").unwrap();
+        assert_eq!(app(&prefs), OverlayCardSize::Large, "a stored macOS size is kept");
         prefs.set(keys::OVERLAY_CARD_SIZE, "huge").unwrap();
-        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Large);
+        assert_eq!(app(&prefs), OverlayCardSize::ExtraLarge);
+
+        let unset = Preferences::in_memory();
+        let deck = AppPreferences { prefs: &unset, dirs: &dirs };
+        assert!(!deck.overlay_dismisses(), "cards stay until dismissed");
+        let mut five = Preferences::in_memory();
+        five.set(keys::OVERLAY_DISMISS_DELAY, 5.0).unwrap();
+        assert!(AppPreferences { prefs: &five, dirs: &dirs }.overlay_dismisses(), "a chosen delay is kept");
     }
 
     #[test]
@@ -383,8 +401,9 @@ mod tests {
         assert!(app.preselect_previous_region());
         assert!(!app.capture_region_on_release());
         assert!(!app.keep_in_deck_until_saved());
-        assert_eq!(app.overlay_dismiss_delay(), 5.0);
-        assert!(app.overlay_dismisses());
+        // Linux keeps cards until dismissed; macOS hides them after 5 s.
+        assert_eq!(app.overlay_dismiss_delay(), OVERLAY_DISMISS_NEVER);
+        assert!(!app.overlay_dismisses());
         assert_eq!(app.export_format(), ExportFormat::Png);
         assert_eq!(app.export_quality(), 0.9);
         assert_eq!(app.history_retention_limit(), 100);

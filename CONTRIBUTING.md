@@ -120,7 +120,9 @@ does not build with Xcode and needs no macOS tools. Run `make -C linux check`
 before submitting changes there, `make -C linux check-ui` for UI changes, and
 `make -C linux check-gnome-helper` for changes to the GNOME Shell helper in
 `linux/gnome-extension/` (it needs `gnome-shell` installed);
-see [linux/README.md](linux/README.md) and the [port plan](docs/linux-port-plan.md).
+see the repository [README](README.md), which documents the Linux port, and the
+[port plan](docs/linux-port-plan.md). The macOS app's README is
+[README.macos.md](README.macos.md).
 Linux changes are recorded in [linux/CHANGELOG.md](linux/CHANGELOG.md), not the
 macOS changelog, and that file is what the Linux app's What's New shows. When you change behavior that a
 `bettershot-core` module ports, such as file naming or share links, update the

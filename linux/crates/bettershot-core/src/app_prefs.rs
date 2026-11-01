@@ -257,10 +257,11 @@ impl AppPreferences<'_> {
         self.prefs.optional_bool(keys::PRESELECT_PREVIOUS_REGION).unwrap_or(true)
     }
 
-    /// Whether still frames are read through screen sharing. Unset, it is on
-    /// for GNOME, whose Screenshot portal flashes the screen on every shot.
+    /// Whether still frames are read through screen sharing, which is silent
+    /// but makes the desktop ask which screens to share. Off by default, so
+    /// region and scrolling captures read every screen with no selection.
     pub fn capture_through_screen_share(&self) -> bool {
-        self.prefs.optional_bool(keys::CAPTURE_THROUGH_SCREEN_SHARE).unwrap_or_else(desktop_flashes_screenshots)
+        self.prefs.optional_bool(keys::CAPTURE_THROUGH_SCREEN_SHARE).unwrap_or(false)
     }
 
     pub fn screen_share_restore_token(&self) -> Option<String> {
@@ -352,13 +353,6 @@ impl AppPreferences<'_> {
 /// Remembers the area chosen with BetterShot's selector for Capture Previous Region.
 pub fn set_last_region_rect(prefs: &mut Preferences, rect: Rect) -> io::Result<()> {
     prefs.set_encoded(keys::LAST_REGION_RECT, &rect)
-}
-
-/// GNOME's Screenshot portal backend takes every shot through the shell
-/// with its flash on, so GNOME sessions default to reading the screen
-/// through screen sharing instead.
-pub fn desktop_flashes_screenshots() -> bool {
-    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.to_ascii_lowercase().contains("gnome"))
 }
 
 #[cfg(test)]

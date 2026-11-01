@@ -19,6 +19,10 @@ use std::process::Command;
 pub enum CaptureError {
     /// The user dismissed the portal dialog.
     Cancelled,
+    /// The desktop refuses BetterShot's non-interactive screenshots because
+    /// the portal's "Allow screenshots?" question was answered No (closing
+    /// it counts as No). The portal then fails silently on every request.
+    Denied,
     /// No way to read the screen is available.
     Unavailable(String),
     Failed(String),
@@ -28,6 +32,10 @@ impl std::fmt::Display for CaptureError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cancelled => write!(f, "The screenshot was cancelled."),
+            Self::Denied => write!(
+                f,
+                "Your desktop is set to refuse BetterShot's screenshots, because its question to allow them was answered Deny or closed."
+            ),
             Self::Unavailable(detail) => write!(
                 f,
                 "No screenshot service is available. Install xdg-desktop-portal and the portal for your desktop (GNOME, KDE, or wlr), or grim. {detail}"
@@ -75,7 +83,15 @@ async fn portal_screenshot(
     let proxy = ScreenshotProxy::new().await.map_err(classify)?;
     let options = ashpd::desktop::screenshot::ScreenshotOptions::default().set_interactive(interactive).set_modal(true);
     let request = proxy.screenshot(parent, options).await.map_err(classify)?;
-    let response = request.response().map_err(classify)?;
+    let response = match request.response() {
+        Ok(response) => response,
+        // A refused non-interactive request comes back as a bare "other"
+        // response; the permission store says whether a stored No caused it.
+        Err(ashpd::Error::Response(ResponseError::Other)) if !interactive && permission_denied().await => {
+            return Err(CaptureError::Denied);
+        }
+        Err(error) => return Err(classify(error)),
+    };
     let path = file_path(response.uri().as_str()).ok_or_else(|| {
         CaptureError::Failed(format!("The portal returned an unreadable location: {}", response.uri().as_str()))
     })?;
@@ -91,6 +107,81 @@ pub(crate) fn classify(error: ashpd::Error) -> CaptureError {
         }
         other => CaptureError::Failed(format!("The screenshot portal failed: {other}")),
     }
+}
+
+const PERMISSION_STORE: &str = "org.freedesktop.impl.portal.PermissionStore";
+const PERMISSION_PATH: &str = "/org/freedesktop/impl/portal/PermissionStore";
+/// The portal frontend keeps the screenshot answer in this table and id.
+const PERMISSION_TABLE: &str = "screenshot";
+
+/// The app ids the portal may have filed BetterShot's answer under: its own
+/// id, the id of the systemd scope it runs in (how the portal identifies an
+/// unsandboxed app), and the empty id it uses when it cannot tell.
+fn candidate_app_ids() -> Vec<String> {
+    let mut ids = vec![bettershot_core::paths::APP_ID.to_owned(), String::new()];
+    if let Some(id) = std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|cgroup| scope_app_id(&cgroup)) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// The app id in a systemd unit name such as
+/// `app-gnome-site.bettershot.BetterShot-1234.scope`, as the portal reads it:
+/// `app[-<launcher>]-<id>[-<random>].scope` or `app[-<launcher>]-<id>[@<random>].service`.
+pub fn scope_app_id(cgroup: &str) -> Option<String> {
+    let unit = cgroup.lines().filter_map(|line| line.rsplit('/').next()).rfind(|unit| unit.starts_with("app-"))?;
+    let rest = unit.strip_prefix("app-")?;
+    let (body, scope) = match rest.strip_suffix(".scope") {
+        Some(body) => (body, true),
+        None => (rest.strip_suffix(".service")?, false),
+    };
+    let body = if scope { body.rsplit_once('-').map_or(body, |(id, _)| id) } else { body.split('@').next()? };
+    // A launcher prefix (`gnome-`, `kde-`) has no dots; an app id does.
+    let id = match body.split_once('-') {
+        Some((launcher, id)) if !launcher.contains('.') && id.contains('.') => id,
+        _ => body,
+    };
+    let id = id.replace("\\x2d", "-");
+    (!id.is_empty()).then_some(id)
+}
+
+async fn permission_store() -> Option<ashpd::zbus::Proxy<'static>> {
+    let connection = ashpd::zbus::Connection::session().await.ok()?;
+    ashpd::zbus::Proxy::new(&connection, PERMISSION_STORE, PERMISSION_PATH, PERMISSION_STORE).await.ok()
+}
+
+async fn stored_answers() -> Option<std::collections::HashMap<String, Vec<String>>> {
+    let store = permission_store().await?;
+    let (answers, _data): (std::collections::HashMap<String, Vec<String>>, ashpd::zvariant::OwnedValue) =
+        store.call("Lookup", &(PERMISSION_TABLE, PERMISSION_TABLE)).await.ok()?;
+    Some(answers)
+}
+
+/// Whether the portal holds a No for BetterShot's screenshots.
+pub async fn permission_denied() -> bool {
+    let Some(answers) = stored_answers().await else { return false };
+    candidate_app_ids().iter().any(|id| answers.get(id).is_some_and(|answer| answer.iter().any(|a| a == "no")))
+}
+
+/// Forgets a stored No for BetterShot's screenshots, so the desktop asks
+/// again on the next capture. This grants nothing: the user still answers
+/// the desktop's own question. Returns how many answers were reset.
+pub async fn reset_permission() -> Result<usize, String> {
+    let store = permission_store().await.ok_or("The desktop's permission store is not running.")?;
+    let answers = stored_answers().await.unwrap_or_default();
+    let mut reset = 0;
+    for id in candidate_app_ids() {
+        if answers.get(&id).is_some_and(|answer| answer.iter().any(|a| a == "no")) {
+            store
+                .call::<_, _, ()>("DeletePermission", &(PERMISSION_TABLE, PERMISSION_TABLE, id.as_str()))
+                .await
+                .map_err(|e| format!("The stored answer could not be reset: {e}"))?;
+            reset += 1;
+        }
+    }
+    Ok(reset)
 }
 
 /// Converts a `file://` URI to a path.
@@ -124,6 +215,23 @@ fn grim(private_dir: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_app_id_the_portal_sees_from_the_systemd_scope() {
+        let gnome = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-site.bettershot.BetterShot-4821.scope\n";
+        assert_eq!(scope_app_id(gnome).as_deref(), Some("site.bettershot.BetterShot"));
+        let plain = "0::/user.slice/user@1000.service/app.slice/app-site.bettershot.BetterShot-77.scope";
+        assert_eq!(scope_app_id(plain).as_deref(), Some("site.bettershot.BetterShot"));
+        let terminal = "0::/user.slice/user@1000.service/app.slice/app-org.gnome.Ptyxis-1203.scope";
+        assert_eq!(
+            scope_app_id(terminal).as_deref(),
+            Some("org.gnome.Ptyxis"),
+            "a terminal's scope names the terminal"
+        );
+        let service = "0::/user.slice/user@1000.service/app.slice/app-gnome-org.example.Tool@abc.service";
+        assert_eq!(scope_app_id(service).as_deref(), Some("org.example.Tool"));
+        assert_eq!(scope_app_id("0::/user.slice/session-2.scope"), None);
+    }
 
     #[test]
     fn parses_file_uris() {

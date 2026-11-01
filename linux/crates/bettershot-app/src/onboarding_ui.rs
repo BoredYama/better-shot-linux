@@ -138,14 +138,20 @@ fn permissions() -> (gtk::Widget, gtk::Label, gtk::Label) {
         let status = status.clone();
         let button = button.clone();
         glib::spawn_future_local(async move {
-            // The same still-frame path captures use: the X server, the
-            // screen-sharing stream (whose one-time dialog belongs here), or
-            // the screenshot portal.
-            let result = crate::capture::frozen_screen(&App::get()).await;
+            use bettershot_platform::screenshot::{self, CaptureError};
+            // The same still-frame path captures use, so the desktop's
+            // one-time "Allow screenshots?" question is asked here.
+            let app = App::get();
+            let mut result = crate::capture::frozen_screen(&app).await;
+            // Clicking Allow here is the user's answer: forget a stored Deny
+            // so the desktop asks again, rather than failing silently.
+            if matches!(result, Err(CaptureError::Denied)) && screenshot::reset_permission().await.is_ok() {
+                result = crate::capture::frozen_screen(&app).await;
+            }
             button.set_sensitive(true);
             status.set_label(match result {
                 Ok(_) => "Allowed",
-                Err(bettershot_platform::screenshot::CaptureError::Cancelled) => "Not allowed. Try again.",
+                Err(CaptureError::Cancelled | CaptureError::Denied) => "Not allowed. Try again, and choose Allow.",
                 Err(_) => "No screenshot service found. See Help.",
             });
         });

@@ -259,7 +259,7 @@ X11 pointer timeline), the teleprompter, and the studio (cuts, backgrounds,
 undo, playback, cursor styles, crop and mask handles, reframing, captions,
 3D shots, Save, and reopening). `BETTERSHOT_UI_ONLY=text,scroll` runs only
 the named scenarios (`autosave`, `manual`, `editor`, `crop`, `hide`, `text`,
-`onboarding`, `whatsnew`, `share`, `pin`, `scroll`, `color`, `redact`,
+`onboarding`, `whatsnew`, `share`, `pin`, `scroll`, `color`, `denied`, `redact`,
 `studio`, `record`, `handles`, `reframe`, `captions`, `teleprompter`,
 `shots3d`, `cursor`). Each step's screenshot lands in `target/ui-snapshots/`.
 The whole suite takes a long while; the `shots3d` scenario alone renders a
@@ -318,15 +318,16 @@ model.
   app's notifications only when its desktop entry is installed, so run
   `make install` (or install a package) rather than the binary from
   `target/`.
-- **The screen still flashes on GNOME:** your desktop declined screen sharing,
-  has no ScreenCast portal, or you shared only some of your screens, so
-  captures fell back to the screenshot portal; the terminal says why. Check
-  Settings › Capture › Read the screen through screen sharing, and when the
-  dialog asks, select every screen.
-- **Only one monitor appears, or another monitor is blank:** you shared a
-  single screen in the dialog. BetterShot now detects this and captures the
-  whole desktop instead, then asks again; select every screen to keep
-  captures silent.
+- **"Screenshots Are Blocked", or captures fail while window capture
+  works:** your desktop remembers a Deny for BetterShot's screenshots
+  (closing its "Allow screenshots?" question also counts as Deny), and then
+  refuses every capture without asking. Choose Ask Again in BetterShot's
+  dialog, or Allow in setup, and pick Allow when the desktop asks. Window
+  capture is unaffected because it always shows the desktop's own dialog.
+- **The screen flashes on GNOME:** GNOME's screenshot portal flashes for
+  each shot. Turn on Settings › Capture › Read the screen through screen
+  sharing for silent captures, and select every screen when the desktop
+  asks which to share.
 - **Global shortcuts do nothing:** the GlobalShortcuts portal needs GNOME
   48, Plasma 6, or Hyprland; elsewhere bind the commands in Settings ›
   Shortcuts through your desktop's keyboard settings.
@@ -440,19 +441,15 @@ Both end with a small Copied window showing what was copied; on Wayland that
 window is also what lets BetterShot write the clipboard, so if your desktop
 leaves it unfocused, click its Copy button.
 
-**Still frames** behind region, scrolling, text, and color captures are read
-directly from the X server on an X11 session (silent, no dialog). On
-Wayland they come from a screen-sharing stream (the ScreenCast portal) when
-Settings › Capture › Read the screen through screen sharing is on, which it
-is by default on GNOME, whose screenshot portal flashes the screen for every
-shot. The first time, your desktop asks which screens to share. Select
-every screen: GNOME's dialog toggles each display on with a click, and a
-capture needs all of them to cover the whole desktop. BetterShot then
-remembers the choice, and later captures are silent apart from the sharing
-indicator in the top bar for a moment. If you share only some screens,
-BetterShot captures the whole desktop through the screenshot portal
-instead (with its flash), forgets that partial choice, and asks again next
-time. Turn the setting off to use the screenshot portal always.
+**Still frames** behind region, scrolling, text, and color captures cover
+every screen with no selection step. On an X11 session they are read
+directly from the X server (silent, no dialog). On Wayland they come from
+the screenshot portal, which captures the whole desktop at once; GNOME
+flashes the screen for each shot and, the first time, asks whether to allow
+BetterShot to take screenshots, so choose Allow. Settings › Capture › Read
+the screen through screen sharing makes captures silent instead, at the
+cost of the desktop asking which screens to share (select every screen);
+it is off by default.
 
 **Scrolling Capture** selects an area from a still frame, then opens a small
 session window. Scroll the content, choose **Add Frame** (or press Enter), and

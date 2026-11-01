@@ -99,6 +99,7 @@ inside() {
   openbox >/dev/null 2>&1 &
   sleep 0.5
   [[ "$SCENARIO" != scroll ]] || export BETTERSHOT_FAKE_SCREEN="$SCROLL_FRAMES"
+  [[ "$SCENARIO" != denied ]] || export BETTERSHOT_FAKE_SCREENSHOT_DENIED=1
   # A new install has no appearance setting; follow a dark "system" instead.
   [[ "$APPEARANCE" != dark ]] || export ADW_DEBUG_COLOR_SCHEME=prefer-dark
   if [[ "$SCENARIO" == share ]]; then
@@ -227,6 +228,15 @@ PY
       local width height
       IFS=x read -r width height <<<"$(size_of "$(saved_files)")"
       (( width < 1280 && height < 800 && width > 900 )) || fail "the crop was not applied ($width x $height)"
+      ;;
+    denied)
+      # A remembered Deny explains itself instead of failing silently.
+      "$BIN" capture region; sleep 2
+      shot "$SCENARIO-$APPEARANCE-2-blocked"
+      [[ -z $(xdotool search --onlyvisible --name '^Captures$' 2>/dev/null) ]] || fail "a refused capture showed a card"
+      xdotool key Escape; sleep 1
+      shot "$SCENARIO-$APPEARANCE-3-cancelled"
+      [[ $(saved_files | wc -l) -eq 0 ]] || fail "a refused capture saved a file"
       ;;
     text)
       # Capture Text copies the selection's text on release.
@@ -943,6 +953,7 @@ for appearance in light dark; do
 done
 for appearance in light dark; do
   scenario color "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
+  scenario denied "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"afterCapture.screenshot.save\": true}"
   scenario redact "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
 done
 for appearance in light dark; do

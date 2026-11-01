@@ -175,6 +175,10 @@ fn fake_screen_frame(fixture: PathBuf) -> PathBuf {
 async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
     let directory = private_dir(app);
     if uses_fake_screen() {
+        // Tests stand in for a desktop that remembers a Deny.
+        if std::env::var_os("BETTERSHOT_FAKE_SCREENSHOT_DENIED").is_some() {
+            return Err(CaptureError::Denied);
+        }
         if let Some(fixture) = std::env::var_os("BETTERSHOT_FAKE_SCREEN") {
             std::fs::create_dir_all(&directory).map_err(|e| CaptureError::Failed(e.to_string()))?;
             let copy = directory.join(format!("fixture-{}.png", uuid::Uuid::new_v4()));
@@ -186,10 +190,40 @@ async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
     screenshot::capture_screen(None, &directory).await
 }
 
-fn report_capture_error(app: &App, error: CaptureError) {
-    if !matches!(error, CaptureError::Cancelled) {
-        app.notify_error("Couldn’t capture screenshot", &error.to_string());
+fn report_capture_error(app: &App, error: CaptureError, action: Action) {
+    match error {
+        CaptureError::Cancelled => {}
+        CaptureError::Denied => offer_screenshot_access(action),
+        error => app.notify_error("Couldn’t capture screenshot", &error.to_string()),
     }
+}
+
+/// The desktop refuses BetterShot's screenshots because its question to
+/// allow them was answered Deny (or closed). Offers to forget that answer so
+/// the desktop asks again, then retries `action`; the user still decides in
+/// the desktop's own dialog.
+pub(crate) fn offer_screenshot_access(action: Action) {
+    let dialog = adw::AlertDialog::new(
+        Some("Screenshots Are Blocked"),
+        Some(
+            "Your desktop is set to refuse BetterShot’s screenshots, because its question to allow them was answered Deny or closed. Ask Again forgets that answer and tries the capture again, so your desktop asks once more. Choose Allow there.",
+        ),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("ask", "Ask Again")]);
+    dialog.set_response_appearance("ask", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("ask"));
+    dialog.set_close_response("cancel");
+    dialog.choose(None::<&gtk::Widget>, None::<&gio::Cancellable>, move |response| {
+        if response != "ask" {
+            return;
+        }
+        glib::spawn_future_local(async move {
+            match screenshot::reset_permission().await {
+                Ok(_) => perform(action),
+                Err(error) => App::get().notify_error("Couldn’t reset screenshot access", &error),
+            }
+        });
+    });
 }
 
 /// Loads a full-desktop screenshot as a frame in the layout's coordinates.
@@ -312,7 +346,7 @@ async fn region(app: &App, action: Action) {
     match result {
         Ok(Some(raw)) => process(app, &raw, action),
         Ok(None) => {}
-        Err(error) => report_capture_error(app, error),
+        Err(error) => report_capture_error(app, error, action),
     }
 }
 
@@ -350,7 +384,7 @@ async fn fullscreen(app: &App) {
     restore_windows(hidden);
     match result {
         Ok(path) => process(app, &path, Action::Fullscreen),
-        Err(error) => report_capture_error(app, error),
+        Err(error) => report_capture_error(app, error, Action::Fullscreen),
     }
 }
 
@@ -363,7 +397,7 @@ async fn window(app: &App) {
     restore_windows(hidden);
     match result {
         Ok(path) => process(app, &path, Action::Window),
-        Err(error) => report_capture_error(app, error),
+        Err(error) => report_capture_error(app, error, Action::Window),
     }
 }
 
@@ -386,7 +420,7 @@ async fn previous_region(app: &App) {
     });
     match result {
         Ok(raw) => process(app, &raw, Action::PreviousRegion),
-        Err(error) => report_capture_error(app, error),
+        Err(error) => report_capture_error(app, error, Action::PreviousRegion),
     }
 }
 
@@ -404,6 +438,7 @@ async fn ocr(app: &App, action: Action) {
     let image = match result {
         Ok(Some(image)) => image,
         Ok(None) => return,
+        Err(CaptureError::Denied) => return offer_screenshot_access(action),
         Err(error) => {
             if !matches!(error, CaptureError::Cancelled) {
                 app.notify_error("Couldn’t recognize text", &error.to_string());
@@ -488,6 +523,7 @@ async fn pick_color(app: &App) {
     match result {
         Ok(Some(hex)) => complete_text_capture(app, &hex, Action::ColorPicker),
         Ok(None) | Err(CaptureError::Cancelled) => {}
+        Err(CaptureError::Denied) => offer_screenshot_access(Action::ColorPicker),
         Err(error) => app.notify_error("Couldn’t pick color", &error.to_string()),
     }
 }
@@ -529,8 +565,13 @@ async fn scroll_with_stream(app: &App) {
         }
         Err(error) => {
             restore_windows(hidden);
-            if !matches!(error, CaptureError::Cancelled) {
-                app.notify_error("Couldn’t capture scrolling area", &format!("{error} Select the area and try again."));
+            match error {
+                CaptureError::Cancelled => {}
+                CaptureError::Denied => offer_screenshot_access(Action::ScrollCapture),
+                error => app.notify_error(
+                    "Couldn’t capture scrolling area",
+                    &format!("{error} Select the area and try again."),
+                ),
             }
             return;
         }

@@ -352,7 +352,7 @@ fn capture_page(app: &App) -> adw::PreferencesPage {
     );
     reading.add(&switch_row(
         "Read the screen through screen sharing",
-        "On Wayland, uses the ScreenCast portal, which is silent; the screenshot portal flashes the screen on GNOME. Your desktop asks once which screens to share: select every screen so captures cover the whole desktop. X11 sessions read the screen directly either way.",
+        "Off: captures read every screen through the screenshot portal with no screen selection (GNOME flashes the screen). On: captures are silent, but your desktop asks which screens to share; select every screen. X11 sessions read the screen directly either way.",
         app.with_prefs(|p| p.capture_through_screen_share()),
         |active| App::get().set_pref(keys::CAPTURE_THROUGH_SCREEN_SHARE, active),
     ));

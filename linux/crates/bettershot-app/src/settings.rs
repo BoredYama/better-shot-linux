@@ -340,6 +340,18 @@ fn capture_page(app: &App) -> adw::PreferencesPage {
     ));
     page.add(&region);
 
+    let reading = group(
+        "Reading the screen",
+        "How BetterShot takes the still frame behind region, scrolling, text, and color captures.",
+    );
+    reading.add(&switch_row(
+        "Read the screen through screen sharing",
+        "Uses the ScreenCast portal, which is silent. The screenshot portal flashes the screen on GNOME. Your desktop asks once which screens to share and remembers it.",
+        app.with_prefs(|p| p.capture_through_screen_share()),
+        |active| App::get().set_pref(keys::CAPTURE_THROUGH_SCREEN_SHARE, active),
+    ));
+    page.add(&reading);
+
     let timer = group("Timer", "");
     let delay = app.with_prefs(|p| p.self_timer_delay());
     timer.add(&combo_row(

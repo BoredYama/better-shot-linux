@@ -45,7 +45,7 @@ not feel native, and Wayland capture still needs native code).
 | macOS component | Linux replacement |
 | --- | --- |
 | AppKit / SwiftUI | GTK 4 + libadwaita (`gtk4-rs`, `libadwaita-rs`) |
-| ScreenCaptureKit (screenshots) | Screenshot portal; X11 direct grab as a fallback |
+| ScreenCaptureKit (screenshots) | ScreenCast stream for silent still frames (GNOME's Screenshot portal flashes); Screenshot portal otherwise |
 | ScreenCaptureKit (recording) | ScreenCast portal → PipeWire → GStreamer `pipewiresrc` |
 | AVFoundation export / VideoToolbox | GStreamer (`x264enc`, `vah264enc`/`vaapih264enc`, `mp4mux`, `qtmux`) |
 | Core Graphics / Core Image drawing | cairo + Pango (`bettershot-render`), one shared rendering path used by preview **and** export |
@@ -235,11 +235,13 @@ Decisions made while building it:
 - Pins are undecorated GTK windows. Wayland gives apps no always-on-top or
   window placement, so pins rely on the desktop's Always on Top and placement.
 - Scrolling capture replaces Vision registration with a search over sampled
-  rows that scores each shift by matching textured rows. Frames come from the
-  Screenshot portal when the user chooses Add Frame (the session window is
-  hidden for each grab), because Wayland exposes neither other apps' scroll
-  events nor a way to exclude BetterShot's windows from screenshots. Automatic
-  frames and Auto Scroll would need a ScreenCast stream and the RemoteDesktop
+  rows that scores each shift by matching textured rows. Frames come from one
+  ScreenCast stream held open for the session, or the Screenshot portal where
+  the user declines sharing, when the user chooses Add Frame (the session
+  window is hidden for each grab), because Wayland exposes neither other
+  apps' scroll events nor a way to exclude BetterShot's windows from
+  screenshots. Automatic frames would need change detection on that stream,
+  and Auto Scroll the RemoteDesktop
   portal; revisit with Phase 5's PipeWire work.
 - Not yet: video pins (with recording) and the macOS scroll preferences
   (`scrollMaxHeight`, frozen-header detection), which use their defaults.

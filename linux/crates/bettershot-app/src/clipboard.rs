@@ -7,8 +7,11 @@
 use crate::app::App;
 use bettershot_core::deck;
 use gtk::prelude::*;
-use gtk::{gdk, gio};
+use gtk::{gdk, gio, glib};
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
+use std::time::Duration;
 
 pub fn copy_capture(app: &App, path: &Path) -> Result<(), String> {
     let copy = {
@@ -56,4 +59,44 @@ pub fn copy_text(text: &str) -> Result<(), String> {
     let display = gdk::Display::default().ok_or("No display is available.")?;
     display.clipboard().set_text(text);
     Ok(())
+}
+
+/// Whether the compositor accepts clipboard writes only from the focused
+/// client: Wayland compositors (mutter cancels any other client's
+/// selection without telling it), not X11.
+pub fn needs_focus() -> bool {
+    gdk::Display::default().is_some_and(|display| display.backend().is_wayland())
+}
+
+type PendingCopy = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
+/// Runs `copy` once `window` is active, so the write is accepted, and after
+/// a moment anyway in case the desktop never focuses it.
+pub fn when_focused(window: Option<&gtk::Window>, copy: impl FnOnce() + 'static) {
+    let Some(window) = window else { return copy() };
+    if !needs_focus() || window.is_active() {
+        return copy();
+    }
+    let pending: PendingCopy = Rc::new(RefCell::new(Some(Box::new(copy))));
+    let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+    let run = {
+        let (pending, handler) = (pending.clone(), handler.clone());
+        move |window: &gtk::Window| {
+            if let Some(copy) = pending.borrow_mut().take() {
+                copy();
+            }
+            if let Some(id) = handler.borrow_mut().take() {
+                window.disconnect(id);
+            }
+        }
+    };
+    let on_active = run.clone();
+    let id = window.connect_is_active_notify(move |window| {
+        if window.is_active() {
+            on_active(window);
+        }
+    });
+    *handler.borrow_mut() = Some(id);
+    let window = window.clone();
+    glib::timeout_add_local_once(Duration::from_millis(1500), move || run(&window));
 }

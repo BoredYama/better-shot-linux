@@ -32,6 +32,11 @@ pub mod keys {
     pub const CAPTURE_REGION_ON_RELEASE: &str = "bs_captureRegionOnRelease";
     pub const PRESELECT_PREVIOUS_REGION: &str = "bs_preselectPreviousRegion";
     pub const SHOW_IN_MENU_BAR: &str = "bs_showInMenuBar";
+    /// Linux only: whether still frames come from a ScreenCast stream
+    /// (silent) instead of the Screenshot portal (which flashes on GNOME),
+    /// and the token that lets that stream reopen without the picker.
+    pub const CAPTURE_THROUGH_SCREEN_SHARE: &str = "bs_captureThroughScreenShare";
+    pub const SCREEN_SHARE_RESTORE_TOKEN: &str = "bs_screenShareRestoreToken";
     /// Recording keys match `AppPreferences.swift` and `BetterShotPreferences.swift`.
     pub const RECORDING_START_DELAY: &str = "bs_recordingStartDelaySeconds";
     pub const OPEN_EDITOR_AFTER_RECORDING: &str = "bs_openEditorAfterRecording";
@@ -246,6 +251,16 @@ impl AppPreferences<'_> {
         self.prefs.optional_bool(keys::PRESELECT_PREVIOUS_REGION).unwrap_or(true)
     }
 
+    /// Whether still frames are read through screen sharing. Unset, it is on
+    /// for GNOME, whose Screenshot portal flashes the screen on every shot.
+    pub fn capture_through_screen_share(&self) -> bool {
+        self.prefs.optional_bool(keys::CAPTURE_THROUGH_SCREEN_SHARE).unwrap_or_else(desktop_flashes_screenshots)
+    }
+
+    pub fn screen_share_restore_token(&self) -> Option<String> {
+        self.prefs.decode::<String>(keys::SCREEN_SHARE_RESTORE_TOKEN).filter(|token| !token.is_empty())
+    }
+
     /// Whether the tray icon is shown.
     pub fn show_tray_icon(&self) -> bool {
         self.prefs.optional_bool(keys::SHOW_IN_MENU_BAR).unwrap_or(true)
@@ -327,6 +342,13 @@ impl AppPreferences<'_> {
 /// Remembers the area chosen with BetterShot's selector for Capture Previous Region.
 pub fn set_last_region_rect(prefs: &mut Preferences, rect: Rect) -> io::Result<()> {
     prefs.set_encoded(keys::LAST_REGION_RECT, &rect)
+}
+
+/// GNOME's Screenshot portal backend takes every shot through the shell
+/// with its flash on, so GNOME sessions default to reading the screen
+/// through screen sharing instead.
+pub fn desktop_flashes_screenshots() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.to_ascii_lowercase().contains("gnome"))
 }
 
 #[cfg(test)]

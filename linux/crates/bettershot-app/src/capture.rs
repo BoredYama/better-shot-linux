@@ -3,7 +3,9 @@
 //! read, then the private staging pipeline and the capture deck.
 
 use crate::app::App;
-use crate::{clipboard, color_picker, countdown, deck_ui, recording, recording_bar, scroll_session, selector};
+use crate::{
+    clipboard, color_picker, copied_hud, countdown, deck_ui, recording, recording_bar, scroll_session, selector,
+};
 use adw::prelude::*;
 use bettershot_core::app_prefs::{self, AppPreferences};
 use bettershot_core::deck::{self, FollowUp, Pipeline};
@@ -11,10 +13,23 @@ use bettershot_core::geometry::Rect;
 use bettershot_core::imaging::{self, EncodeOptions, FrozenFrame};
 use bettershot_core::shortcuts::Action;
 use bettershot_core::text_recognition;
+use bettershot_platform::screen_stream::{self, ScreenStream};
 use bettershot_platform::screenshot::{self, CaptureError};
 use gtk::{gdk, gio, glib};
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
+
+/// How long a freshly shared screen may take to send its first frame.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+
+thread_local! {
+    /// The screen stream a scrolling session keeps open between frames, and
+    /// whether one should be kept.
+    static HELD_STREAM: RefCell<Option<Rc<ScreenStream>>> = const { RefCell::new(None) };
+    static HOLDING_STREAM: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Starts `action`, or queues it behind the capture in progress.
 pub fn perform(action: Action) {
@@ -176,12 +191,81 @@ pub(crate) fn frozen_frame(path: &Path, layout: &Layout) -> Result<FrozenFrame, 
     Ok(FrozenFrame { points_rect: layout.bounds, image })
 }
 
+/// A still frame of every display. Reads the shared-screen stream when the
+/// user allows it (silent; GNOME's screenshot portal flashes the screen),
+/// and otherwise, or when the stream fails, the Screenshot portal. Tests
+/// substitute the fixture image.
+pub(crate) async fn frozen_screen(app: &App) -> Result<FrozenFrame, CaptureError> {
+    let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
+    if uses_fake_screen() || !app.with_prefs(|p| p.capture_through_screen_share()) {
+        return portal_frozen_screen(app, &layout).await;
+    }
+    match stream_frozen_screen(app, &layout).await {
+        Ok(frame) => Ok(frame),
+        // A declined share dialog still means the user wants this capture.
+        Err(error) => {
+            eprintln!("bettershot: screen sharing could not read the screen ({error}); using the screenshot portal");
+            portal_frozen_screen(app, &layout).await
+        }
+    }
+}
+
+async fn portal_frozen_screen(app: &App, layout: &Layout) -> Result<FrozenFrame, CaptureError> {
+    let path = capture_screen(app).await?;
+    let frame = frozen_frame(&path, layout);
+    let _ = std::fs::remove_file(&path);
+    frame.map_err(CaptureError::Failed)
+}
+
+async fn stream_frozen_screen(app: &App, layout: &Layout) -> Result<FrozenFrame, CaptureError> {
+    let held = HELD_STREAM.with(|held| held.borrow().clone());
+    let stream = match held {
+        Some(stream) => stream,
+        None => {
+            let token = app.with_prefs(|p| p.screen_share_restore_token());
+            let stream = Rc::new(ScreenStream::open(token.as_deref()).await?);
+            if let Some(token) = stream.restore_token() {
+                app.set_pref(app_prefs::keys::SCREEN_SHARE_RESTORE_TOKEN, token);
+            }
+            if HOLDING_STREAM.with(Cell::get) {
+                HELD_STREAM.with(|held| *held.borrow_mut() = Some(stream.clone()));
+            }
+            stream
+        }
+    };
+    let frames = stream.frames(FIRST_FRAME_TIMEOUT).map_err(CaptureError::Failed);
+    if !HOLDING_STREAM.with(Cell::get) {
+        stream.close().await;
+    }
+    let monitors: Vec<Rect> = layout.monitors.iter().map(|(_, rect)| *rect).collect();
+    screen_stream::compose(&frames?, &monitors, layout.bounds).map_err(CaptureError::Failed)
+}
+
+/// Keeps the next screen stream open for repeated frames (a scrolling
+/// session), so each frame is a silent read instead of a new session.
+fn hold_stream() {
+    HOLDING_STREAM.with(|holding| holding.set(true));
+}
+
+/// Whether frames currently come from a held stream, which can be read
+/// again at no cost to settle animating content.
+fn stream_held() -> bool {
+    HELD_STREAM.with(|held| held.borrow().is_some())
+}
+
+async fn release_stream() {
+    HOLDING_STREAM.with(|holding| holding.set(false));
+    if let Some(stream) = HELD_STREAM.with(|held| held.borrow_mut().take()) {
+        stream.close().await;
+    }
+}
+
 async fn region(app: &App, action: Action) {
     let hidden = hide_windows(app).await;
     countdown_if_needed(app, action).await;
-    let captured = capture_screen(app).await;
+    let captured = frozen_screen(app).await;
     let result = match captured {
-        Ok(path) => select_and_crop(app, &path).await,
+        Ok(frame) => select_and_crop(app, frame).await,
         Err(error) => Err(error),
     };
     restore_windows(hidden);
@@ -194,11 +278,9 @@ async fn region(app: &App, action: Action) {
 
 /// Shows the frozen frame for selection and crops the chosen area from that
 /// same frame at native pixel size; selecting never takes a second shot.
-async fn select_and_crop(app: &App, full: &Path) -> Result<Option<PathBuf>, CaptureError> {
+async fn select_and_crop(app: &App, frame: FrozenFrame) -> Result<Option<PathBuf>, CaptureError> {
     let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
-    let frame = frozen_frame(full, &layout).map_err(CaptureError::Failed);
-    let _ = std::fs::remove_file(full);
-    let frame = std::rc::Rc::new(frame?);
+    let frame = Rc::new(frame);
     let (preselect, on_release) = app.with_prefs(|p| {
         (p.preselect_previous_region().then(|| p.last_region_rect()).flatten(), p.capture_region_on_release())
     });
@@ -221,7 +303,10 @@ fn write_raw(app: &App, image: &image::RgbaImage) -> Result<PathBuf, CaptureErro
 async fn fullscreen(app: &App) {
     let hidden = hide_windows(app).await;
     countdown_if_needed(app, Action::Fullscreen).await;
-    let result = capture_screen(app).await;
+    let result = match frozen_screen(app).await {
+        Ok(frame) => write_raw(app, &frame.image),
+        Err(error) => Err(error),
+    };
     restore_windows(hidden);
     match result {
         Ok(path) => process(app, &path, Action::Fullscreen),
@@ -249,13 +334,10 @@ async fn previous_region(app: &App) {
         return;
     };
     let hidden = hide_windows(app).await;
-    let captured = capture_screen(app).await;
+    let captured = frozen_screen(app).await;
     restore_windows(hidden);
-    let result = captured.and_then(|path| {
-        let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
-        let frame = frozen_frame(&path, &layout).map_err(CaptureError::Failed);
-        let _ = std::fs::remove_file(&path);
-        let cropped = frame?.cropped(rect).map_err(|_| {
+    let result = captured.and_then(|frame| {
+        let cropped = frame.cropped(rect).map_err(|_| {
             CaptureError::Failed(
                 "The previous area is no longer on screen. Capture a region to choose a new one.".into(),
             )
@@ -273,9 +355,9 @@ async fn previous_region(app: &App) {
 /// release and does not change the remembered area.
 async fn ocr(app: &App, action: Action) {
     let hidden = hide_windows(app).await;
-    let captured = capture_screen(app).await;
+    let captured = frozen_screen(app).await;
     let result = match captured {
-        Ok(path) => select_text_area(&path).await,
+        Ok(frame) => select_text_area(frame).await,
         Err(error) => Err(error),
     };
     restore_windows(hidden);
@@ -321,11 +403,9 @@ async fn ocr(app: &App, action: Action) {
     }
 }
 
-async fn select_text_area(full: &Path) -> Result<Option<image::RgbaImage>, CaptureError> {
+async fn select_text_area(frame: FrozenFrame) -> Result<Option<image::RgbaImage>, CaptureError> {
     let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
-    let frame = frozen_frame(full, &layout).map_err(CaptureError::Failed);
-    let _ = std::fs::remove_file(full);
-    let frame = std::rc::Rc::new(frame?);
+    let frame = Rc::new(frame);
     let Some(selection) = selector::select(frame.clone(), &layout, None, true, selector::TEXT_HINT).await else {
         return Ok(None);
     };
@@ -356,19 +436,12 @@ async fn pick_color(app: &App) {
         }
     }
     let hidden = hide_windows(app).await;
-    let captured = capture_screen(app).await;
+    let captured = frozen_screen(app).await;
     let result = match captured {
-        Ok(path) => {
-            let picked = match layout() {
-                Some(layout) => match frozen_frame(&path, &layout) {
-                    Ok(frame) => Ok(color_picker::pick(std::rc::Rc::new(frame), &layout).await),
-                    Err(error) => Err(CaptureError::Failed(error)),
-                },
-                None => Err(CaptureError::Failed("No display is connected.".into())),
-            };
-            let _ = std::fs::remove_file(&path);
-            picked
-        }
+        Ok(frame) => match layout() {
+            Some(layout) => Ok(color_picker::pick(Rc::new(frame), &layout).await),
+            None => Err(CaptureError::Failed("No display is connected.".into())),
+        },
         Err(error) => Err(error),
     };
     restore_windows(hidden);
@@ -387,23 +460,25 @@ pub fn complete_text_capture(app: &App, text: &str, action: Action) {
         return;
     }
     let value = if action == Action::OcrSingleLine { text_recognition::single_line(text) } else { text.to_string() };
-    let copied = clipboard::copy_text(&value);
-    let is_color = action == Action::ColorPicker;
-    if copied.is_ok() {
-        app.play_shutter();
-        let body = if is_color { format!("{value} copied to clipboard") } else { "Text copied to clipboard".into() };
-        app.notify("Copied", &body);
-    } else {
-        app.notify_error("Couldn’t copy", "Try Copy again.");
-    }
+    let swatch = (action == Action::ColorPicker).then(|| text_recognition::rgb_from_hex(&value)).flatten();
+    app.play_shutter();
+    copied_hud::show(app, value, swatch);
 }
 
 /// Scrolling Capture: select an area, then add frames while scrolling it; the
 /// stitched image goes through the normal private staging and the deck.
 async fn scroll(app: &App) {
+    // One shared-screen stream serves the whole session, so every frame is
+    // a silent read; the Screenshot portal would flash for each one.
+    hold_stream();
+    scroll_with_stream(app).await;
+    release_stream().await;
+}
+
+async fn scroll_with_stream(app: &App) {
     let hidden = hide_windows(app).await;
-    let selected = match capture_screen(app).await {
-        Ok(path) => select_scroll_area(app, &path).await,
+    let selected = match frozen_screen(app).await {
+        Ok(frame) => select_scroll_area(app, frame).await,
         Err(error) => Err(error),
     };
     let (rect, first) = match selected {
@@ -422,16 +497,13 @@ async fn scroll(app: &App) {
     };
     let grab: scroll_session::Grab = Box::new(move || {
         Box::pin(async move {
-            let app = App::get();
-            let path = capture_screen(&app).await.map_err(|e| e.to_string())?;
-            let frame = layout()
-                .ok_or_else(|| "No display is connected.".to_string())
-                .and_then(|layout| frozen_frame(&path, &layout));
-            let _ = std::fs::remove_file(&path);
-            scroll_session::crop_area(&frame?, rect)
+            let frame = frozen_screen(&App::get()).await.map_err(|e| e.to_string())?;
+            scroll_session::crop_area(&frame, rect)
         })
     });
-    let outcome = scroll_session::run(first, grab, !uses_fake_screen()).await;
+    // Re-reading to let animating content settle is free from a stream;
+    // through the screenshot portal each read would flash the screen again.
+    let outcome = scroll_session::run(first, grab, stream_held()).await;
     restore_windows(hidden);
     if let scroll_session::Outcome::Completed(image) = outcome {
         match write_raw(app, &image) {
@@ -444,11 +516,9 @@ async fn scroll(app: &App) {
     }
 }
 
-async fn select_scroll_area(app: &App, full: &Path) -> Result<Option<(Rect, image::RgbaImage)>, CaptureError> {
+async fn select_scroll_area(app: &App, frame: FrozenFrame) -> Result<Option<(Rect, image::RgbaImage)>, CaptureError> {
     let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
-    let frame = frozen_frame(full, &layout).map_err(CaptureError::Failed);
-    let _ = std::fs::remove_file(full);
-    let frame = std::rc::Rc::new(frame?);
+    let frame = Rc::new(frame);
     let (preselect, on_release) = app.with_prefs(|p| {
         (p.preselect_previous_region().then(|| p.last_region_rect()).flatten(), p.capture_region_on_release())
     });
@@ -484,12 +554,18 @@ pub fn process(app: &App, raw: &Path, action: Action) {
         );
     }
     app.state_mut().last_capture = Some(processed.display.clone());
-    if processed.copy {
-        if let Err(error) = clipboard::copy_capture(app, &processed.display) {
-            app.notify_error("Copy failed", &error);
-        }
-    }
     let card = deck_ui::show(app, &processed);
+    if processed.copy {
+        // The deck has just been presented; Wayland accepts the write only
+        // once it is the focused window.
+        let display = processed.display.clone();
+        clipboard::when_focused(deck_ui::window().as_ref(), move || {
+            let app = App::get();
+            if let Err(error) = clipboard::copy_capture(&app, &display) {
+                app.notify_error("Copy failed", &error);
+            }
+        });
+    }
     match processed.follow_up {
         FollowUp::ShowSaveFailure => card.show_save_failure(),
         FollowUp::Save => card.save(),

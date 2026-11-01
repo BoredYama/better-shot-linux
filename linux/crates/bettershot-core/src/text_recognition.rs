@@ -185,6 +185,16 @@ pub fn hex_color(red: f64, green: f64, blue: f64) -> Option<String> {
     Some(format!("#{:02X}{:02X}{:02X}", bytes[0], bytes[1], bytes[2]))
 }
 
+/// The components of a `#RRGGBB` value from `hex_color`.
+pub fn rgb_from_hex(hex: &str) -> Option<(u8, u8, u8)> {
+    let digits = hex.trim().strip_prefix('#')?;
+    if digits.len() != 6 {
+        return None;
+    }
+    let component = |range: std::ops::Range<usize>| u8::from_str_radix(&digits[range], 16).ok();
+    Some((component(0..2)?, component(2..4)?, component(4..6)?))
+}
+
 // MARK: - Sensitive text
 
 struct Rule {
@@ -481,6 +491,10 @@ mod tests {
         assert_eq!(hex_color(1.0, 0.5, 0.0).as_deref(), Some("#FF8000"));
         assert_eq!(hex_color(1.2, -0.1, 0.0).as_deref(), Some("#FF0000"));
         assert_eq!(hex_color(f64::NAN, 0.0, 0.0), None);
+        assert_eq!(rgb_from_hex("#FF8000"), Some((255, 128, 0)));
+        assert_eq!(rgb_from_hex(" #0a0B0c "), Some((10, 11, 12)));
+        assert_eq!(rgb_from_hex("FF8000"), None);
+        assert_eq!(rgb_from_hex("#FF80"), None);
     }
 
     #[test]

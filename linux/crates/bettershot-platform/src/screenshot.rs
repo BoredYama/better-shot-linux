@@ -82,7 +82,7 @@ async fn portal_screenshot(
     take_ownership(&path, private_dir)
 }
 
-fn classify(error: ashpd::Error) -> CaptureError {
+pub(crate) fn classify(error: ashpd::Error) -> CaptureError {
     match error {
         ashpd::Error::Response(ResponseError::Cancelled) => CaptureError::Cancelled,
         ashpd::Error::PortalNotFound(_) | ashpd::Error::Zbus(_) => CaptureError::Unavailable(error.to_string()),

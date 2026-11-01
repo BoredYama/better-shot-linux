@@ -135,6 +135,11 @@ window.pinned-screenshot {
   border-radius: 12px;
 }
 
+.copied-hud {
+  padding: 12px 16px;
+  border-radius: 12px;
+}
+
 .transfer-card button.small {
   min-height: 24px;
   padding: 2px 10px;

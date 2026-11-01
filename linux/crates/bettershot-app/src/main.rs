@@ -5,6 +5,7 @@ mod capture;
 mod cli;
 mod clipboard;
 mod color_picker;
+mod copied_hud;
 mod countdown;
 mod deck_ui;
 mod editor;

@@ -9,6 +9,7 @@ pub mod media;
 pub mod pointer;
 pub mod r2_client;
 pub mod recorder;
+pub mod screen_stream;
 pub mod screenshot;
 pub mod secrets;
 pub mod transcription;

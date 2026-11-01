@@ -258,7 +258,10 @@ saving, Discard's confirmation, recovery of an interrupted package, and the
 X11 pointer timeline), the teleprompter, and the studio (cuts, backgrounds,
 undo, playback, cursor styles, crop and mask handles, reframing, captions,
 3D shots, Save, and reopening). `BETTERSHOT_UI_ONLY=text,scroll` runs only
-the named scenarios. Each step's screenshot lands in `target/ui-snapshots/`.
+the named scenarios (`autosave`, `manual`, `editor`, `crop`, `hide`, `text`,
+`onboarding`, `whatsnew`, `share`, `pin`, `scroll`, `color`, `redact`,
+`studio`, `record`, `handles`, `reframe`, `captions`, `teleprompter`,
+`shots3d`, `cursor`). Each step's screenshot lands in `target/ui-snapshots/`.
 The whole suite takes a long while; the `shots3d` scenario alone renders a
 3D export on the CPU for a few minutes.
 
@@ -304,6 +307,14 @@ model.
   fallback is GStreamer's `ximagesrc`, in `gstreamer1.0-x` on Debian.
 - **No tray icon on GNOME:** install the AppIndicator extension; the tray
   uses StatusNotifierItem.
+- **No notifications on GNOME** (errors, "No text found"): GNOME shows an
+  app's notifications only when its desktop entry is installed, so run
+  `make install` (or install a package) rather than the binary from
+  `target/`.
+- **The screen still flashes on GNOME:** your desktop declined screen sharing
+  or has no ScreenCast portal, so captures fell back to the screenshot
+  portal; the terminal says why. Check Settings › Capture › Read the screen
+  through screen sharing and allow the share when asked.
 - **Global shortcuts do nothing:** the GlobalShortcuts portal needs GNOME
   48, Plasma 6, or Hyprland; elsewhere bind the commands in Settings ›
   Shortcuts through your desktop's keyboard settings.
@@ -412,6 +423,18 @@ button, or right-click to copy or close it. Ctrl+C copies and Ctrl+W closes.
 it when you release. If no text is found, the clipboard keeps what it had.
 **Pick Color** uses your desktop's color picker, or a magnifier over a still
 frame where the desktop has none; click a pixel to copy its `#RRGGBB` value.
+Both end with a small Copied window showing what was copied; on Wayland that
+window is also what lets BetterShot write the clipboard, so if your desktop
+leaves it unfocused, click its Copy button.
+
+**Still frames** behind region, scrolling, text, and color captures come from
+a screen-sharing stream (the ScreenCast portal) when Settings › Capture ›
+Read the screen through screen sharing is on, which it is by default on
+GNOME, whose screenshot portal flashes the screen for every shot. The first
+time, your desktop asks which screens to share; choose all of them and it
+remembers the choice, and later captures are silent apart from the sharing
+indicator in the top bar for a moment. Turn the setting off to use the
+screenshot portal instead.
 
 **Scrolling Capture** selects an area from a still frame, then opens a small
 session window. Scroll the content, choose **Add Frame** (or press Enter), and
@@ -533,7 +556,12 @@ for example `bettershot capture region`.
 - **Scrolling capture is manual.** macOS adds frames on its own as you scroll
   and auto-scrolls. Wayland gives apps neither scroll events from other apps
   nor a way to keep their own windows out of screenshots, so you choose Add
-  Frame after each scroll. Auto Scroll is not available.
+  Frame after each scroll. Auto Scroll is not available. With screen sharing
+  off on GNOME, every frame flashes the screen once.
+- **Window captures use your desktop's screenshot dialog.** Wayland reports no
+  window positions to apps, so there is no way to pick a window on a still
+  frame as macOS does; the dialog (GNOME's screenshot UI, KDE's Spectacle
+  picker) is the only route.
 - **Pins don't stay on top by themselves.** Wayland doesn't let apps keep
   windows above others; use your desktop's Always on Top (Alt+Space or
   Super+Space opens the window menu on GNOME and KDE).
@@ -564,7 +592,7 @@ for example `bettershot capture region`.
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
 | [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas, every image export, and the studio's preview and video export |
-| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, the GStreamer recorder, X11 pointer sampling, frame and audio readers, the video exporter, whisper.cpp, media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
+| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, silent still frames from a ScreenCast stream, the GStreamer recorder, X11 pointer sampling, frame and audio readers, the video exporter, whisper.cpp, media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
 
 ### What `bettershot-core` covers
@@ -614,7 +642,8 @@ options; outlines are close to, but not pixel-identical with, the macOS ink.
 
 - **Region selection** always uses a still frame, because Wayland does not let
   an app read the live screen behind an overlay. The crop comes from that same
-  frame at native pixel size.
+  frame at native pixel size. The frame comes from a ScreenCast stream where
+  the user allows it (silent) and from the Screenshot portal otherwise.
 - **Window screenshots** use the desktop's screenshot dialog, the counterpart of
   macOS's native window selector.
 - **The portal's file** is moved into BetterShot's private folder, so nothing

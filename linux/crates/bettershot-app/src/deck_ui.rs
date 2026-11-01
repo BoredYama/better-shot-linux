@@ -63,6 +63,11 @@ pub fn show(app: &App, processed: &ProcessedCapture) -> Card {
     card
 }
 
+/// The deck window, once a card has been shown.
+pub fn window() -> Option<gtk::Window> {
+    DECK.with(|deck| deck.borrow().as_ref().map(|d| d.window.clone()))
+}
+
 /// Shows a card for a file already in the library or save folder (Gallery
 /// Open). It stays until dismissed.
 pub fn show_existing(app: &App, path: &Path) {

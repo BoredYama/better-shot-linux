@@ -3,7 +3,7 @@
 //! read, then the private staging pipeline and the capture deck.
 
 use crate::app::App;
-use crate::{clipboard, color_picker, countdown, deck_ui, scroll_session, selector};
+use crate::{clipboard, color_picker, countdown, deck_ui, recording, recording_bar, scroll_session, selector};
 use adw::prelude::*;
 use bettershot_core::app_prefs::{self, AppPreferences};
 use bettershot_core::deck::{self, FollowUp, Pipeline};
@@ -24,6 +24,15 @@ pub fn perform(action: Action) {
         return;
     }
     let app = App::get();
+    // Recording controls act at once; they never wait behind a screenshot.
+    match action {
+        Action::Recording | Action::RecordingOptions => return recording_bar::present(&app, action),
+        Action::RecordArea => return recording::start(bettershot_core::recording::SourceMode::Area),
+        Action::StopRecording => return recording::stop(),
+        Action::PauseRecording => return recording::toggle_pause(),
+        Action::RestartRecording | Action::DiscardRecording => return recording::confirm(action),
+        _ => {}
+    }
     {
         let mut state = app.state_mut();
         if state.capture_in_progress {
@@ -87,7 +96,7 @@ pub fn layout() -> Option<Layout> {
 
 /// Hides BetterShot's windows so they never appear in a capture, and waits
 /// for the compositor to take them off screen.
-async fn hide_windows(app: &App) -> Vec<gtk::Window> {
+pub(crate) async fn hide_windows(app: &App) -> Vec<gtk::Window> {
     let windows = app.visible_windows();
     for window in &windows {
         window.set_visible(false);
@@ -98,7 +107,7 @@ async fn hide_windows(app: &App) -> Vec<gtk::Window> {
     windows
 }
 
-fn restore_windows(windows: Vec<gtk::Window>) {
+pub(crate) fn restore_windows(windows: Vec<gtk::Window>) {
     for window in windows {
         window.set_visible(true);
     }
@@ -120,7 +129,7 @@ fn private_dir(app: &App) -> PathBuf {
     app.state().dirs.runtime.join("Captures")
 }
 
-fn uses_fake_screen() -> bool {
+pub(crate) fn uses_fake_screen() -> bool {
     std::env::var("BETTERSHOT_TESTING").as_deref() == Ok("1") && std::env::var_os("BETTERSHOT_FAKE_SCREEN").is_some()
 }
 
@@ -141,7 +150,7 @@ fn fake_screen_frame(fixture: PathBuf) -> PathBuf {
 }
 
 /// Reads every display through the portal. Tests substitute a fixture image.
-async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
+pub(crate) async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
     let directory = private_dir(app);
     if uses_fake_screen() {
         if let Some(fixture) = std::env::var_os("BETTERSHOT_FAKE_SCREEN") {
@@ -162,7 +171,7 @@ fn report_capture_error(app: &App, error: CaptureError) {
 }
 
 /// Loads a full-desktop screenshot as a frame in the layout's coordinates.
-fn frozen_frame(path: &Path, layout: &Layout) -> Result<FrozenFrame, String> {
+pub(crate) fn frozen_frame(path: &Path, layout: &Layout) -> Result<FrozenFrame, String> {
     let image = imaging::load_rgba(path).map_err(|e| e.to_string())?;
     Ok(FrozenFrame { points_rect: layout.bounds, image })
 }

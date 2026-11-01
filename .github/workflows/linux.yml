@@ -41,6 +41,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev desktop-file-utils appstream \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-pipewire \
+            gstreamer1.0-plugins-base-apps \
             xvfb openbox xdotool xclip imagemagick python3-pil dbus \
             tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
 

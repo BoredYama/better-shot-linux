@@ -1,7 +1,7 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0–4 complete (core, CI, screenshot app, image editor, capture
-extras, sharing and library). Phase 5 is next.
+Status: Phases 0–5 complete (core, CI, screenshot app, image editor, capture
+extras, sharing and library, screen recording). Phase 6 is next.
 
 ## What is being ported
 
@@ -274,13 +274,56 @@ Decisions made while building it:
   `BSD-3-Clause AND GPL-3.0-only` (and so does the AppStream metadata) because
   scrolling capture adapts MacShot; render and platform stay BSD-3-Clause.
 
-### Phase 5: Screen recording
+### Phase 5: Screen recording (done)
 - Display/window/area recording via ScreenCast + GStreamer, system audio
   (PipeWire monitor) and microphone, camera via Camera portal.
 - Recording bar: Stop/timer, Pause, Restart, Discard with confirmations.
 - Pointer timeline from cursor metadata; package layout matching the macOS one
   (`screen.mov`, optional `camera.mov`, metadata JSON, flattened deliverable).
 - Recovery of interrupted recordings.
+
+Delivered as `bettershot-core::recording`, `bettershot-platform::{recorder,
+media, devices}`, and the bar, card, and engine in `bettershot-app`
+(`recording_bar.rs`, `recording_card.rs`, `recording.rs`). Decisions made
+while building it:
+
+- The package is the macOS one: `Name.bettershotrec/` with `screen.mov`,
+  optional `camera.mov`, `capture.json`, `input.json`, `project.json`,
+  `poster.jpg`, and later `edit.json`/`render.json`, encoded as Swift does
+  (ISO 8601 dates, sorted keys, omitted optionals). Deliverable naming, the
+  Save-replaces-the-export rule, and the render-freshness stamp are ported,
+  with edit documents kept as opaque JSON until Phase 6.
+- Capture is the ScreenCast portal → `pipewiresrc` → `x264enc` (or
+  `vah264enc`/`openh264enc`) → `qtmux` writing a fragmented `screen.mov`
+  (`first-moov-then-finalise`), so a crash leaves a playable file. Pausing
+  sets the pipeline to PAUSED, which holds the live sources and keeps running
+  time continuous, so the movie has no gap. An area is cropped from the chosen
+  display's stream (`videocrop`, even sizes), since the portal cannot share a
+  region. The portal's restore token skips the picker on later recordings.
+- The cursor is embedded in the pixels (`pointerSynthesized: false`, the
+  macOS legacy-session shape). GStreamer's `pipewiresrc` drops the stream's
+  cursor metadata, so a separate pointer timeline needs the raw PipeWire API
+  (`pipewire` crate) and comes with the Phase 6 compositor; `input.json` is
+  written empty. Cursor restyling and press effects therefore wait too.
+- System audio comes from the default output's PulseAudio monitor and the
+  microphone from `pulsesrc`, each as its own AAC (or Opus) track, as the macOS
+  writer keeps them. The camera uses `v4l2src` into `camera.mov`, with
+  `cameraLeadIn` measured between the two first frames on the shared clock;
+  the Camera portal is not used, so a Flatpak build will need it.
+- Save converts the QuickTime master to MP4 by remuxing (`qtdemux` →
+  `mp4mux`), never re-encoding; the deliverable is the screen master until
+  the video editor can flatten camera and effects.
+- The capture bar is one window: a 64 px picker row (screenshot modes,
+  Display/Window/Area, Camera/Mic/Audio, Timer) that morphs into the 38 px
+  recording row. Wayland cannot keep it out of a display recording, so it
+  stays visible to be moved aside; Discard and Start Over confirm in a
+  standalone `gtk::AlertDialog`, never a sheet on the bar.
+- Under testing, `BETTERSHOT_FAKE_SCREEN` plays as a live `imagefreeze`
+  source and audio/camera use test sources, so `check-ui.sh` records, pauses,
+  stops, saves, discards, and recovers without a desktop.
+- Not yet: video share bundles (poster and duration in the manifest), the
+  Camera portal, cursor metadata, and keystroke overlays (Wayland offers no
+  global input).
 
 ### Phase 6: Video editor
 - Timeline with cuts (scissors), speed, trims, zoom segments (port

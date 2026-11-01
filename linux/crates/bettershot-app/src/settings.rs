@@ -73,6 +73,7 @@ fn build(app: &App) -> adw::PreferencesWindow {
         .build();
     window.add(&general_page(app, &window));
     window.add(&capture_page(app));
+    window.add(&recording_page(app));
     window.add(&deck_page(app));
     window.add(&shortcuts_page(app));
     window.add(&sharing_page(app, &window));
@@ -358,6 +359,111 @@ fn capture_page(app: &App) -> adw::PreferencesPage {
             .build(),
     );
     page.add(&window);
+    page
+}
+
+// MARK: - Recording
+
+fn recording_page(app: &App) -> adw::PreferencesPage {
+    use bettershot_core::after_capture::{self, AfterCaptureAction, CaptureType};
+    use bettershot_core::app_prefs::RECORDING_FRAME_RATE_CHOICES;
+    use bettershot_platform::devices;
+
+    let page = adw::PreferencesPage::builder().title("Recording").icon_name("media-record-symbolic").build();
+    let recording = group(
+        "Recording",
+        "Your desktop’s screen-sharing dialog chooses the display or window; an area is cropped from its display. The capture bar stays on screen, so keep it off the recorded area.",
+    );
+    if let Err(problem) = crate::recording::availability() {
+        let row = adw::ActionRow::builder().title("Recording is unavailable").build();
+        row.set_subtitle(&problem);
+        row.add_css_class("error");
+        recording.add(&row);
+    }
+    let delay = app.with_prefs(|p| p.recording_start_delay_seconds());
+    recording.add(&combo_row(
+        "Delay",
+        "Count down before recording starts.",
+        &["Off", "3 seconds", "5 seconds", "10 seconds"],
+        SELF_TIMER_CHOICES.iter().position(|d| *d == delay).unwrap_or(0),
+        |index| App::get().set_pref(keys::RECORDING_START_DELAY, SELF_TIMER_CHOICES[index]),
+    ));
+    let frame_rate = app.with_prefs(|p| p.recording_frame_rate());
+    recording.add(&combo_row(
+        "Frame rate",
+        "60 fps keeps cursor movement smoother; 24 and 30 make smaller files.",
+        &["24 fps", "30 fps", "60 fps"],
+        RECORDING_FRAME_RATE_CHOICES.iter().position(|r| *r == frame_rate).unwrap_or(1),
+        |index| App::get().set_pref(keys::RECORDING_FRAME_RATE, RECORDING_FRAME_RATE_CHOICES[index]),
+    ));
+    recording.add(&switch_row(
+        "Save recordings automatically",
+        "Write each recording to the save folder as soon as it stops. Its card can still copy, open, or delete it.",
+        after_capture::is_enabled(AfterCaptureAction::Save, CaptureType::Recording, &app.state().prefs),
+        |active| {
+            let app = App::get();
+            let result = {
+                let mut state = app.state_mut();
+                after_capture::set_enabled(AfterCaptureAction::Save, CaptureType::Recording, active, &mut state.prefs)
+            };
+            if let Err(error) = result {
+                app.notify_error("Couldn’t save settings", &error.to_string());
+            }
+        },
+    ));
+    page.add(&recording);
+
+    let inputs = group(
+        "Inputs",
+        "System audio and the microphone are separate tracks; the camera is a separate movie in the project.",
+    );
+    inputs.add(&switch_row(
+        "Record system audio",
+        "What the computer plays, from the default output’s monitor.",
+        app.with_prefs(|p| p.recording_system_audio()),
+        |active| App::get().set_pref(keys::RECORDING_SYSTEM_AUDIO, active),
+    ));
+    let microphones: Vec<devices::AudioDevice> =
+        devices::audio_sources().into_iter().filter(|d| !d.is_monitor).collect();
+    let mut microphone_options: Vec<String> = vec!["Off".into(), "Default microphone".into()];
+    microphone_options.extend(microphones.iter().map(|d| d.name.clone()));
+    let microphone_ids: Vec<String> = microphones.iter().map(|d| d.id.clone()).collect();
+    let current_microphone = app.with_prefs(|p| p.recording_microphone_device_id());
+    let selected_microphone = match current_microphone.as_deref() {
+        None => 0,
+        Some("default") => 1,
+        Some(id) => microphone_ids.iter().position(|candidate| candidate == id).map(|i| i + 2).unwrap_or(1),
+    };
+    let options: Vec<&str> = microphone_options.iter().map(String::as_str).collect();
+    inputs.add(&combo_row("Microphone", "Narration, as its own track.", &options, selected_microphone, move |index| {
+        let value = match index {
+            0 => String::new(),
+            1 => "default".into(),
+            other => microphone_ids.get(other - 2).cloned().unwrap_or_else(|| "default".into()),
+        };
+        App::get().set_pref(keys::RECORDING_MICROPHONE_DEVICE_ID, value);
+    }));
+    let cameras = devices::cameras();
+    let mut camera_options: Vec<String> = vec!["Off".into()];
+    camera_options.extend(cameras.iter().map(|d| d.name.clone()));
+    let camera_ids: Vec<String> = cameras.iter().map(|d| d.id.clone()).collect();
+    let current_camera = app.with_prefs(|p| p.recording_camera_device_id());
+    let selected_camera = current_camera
+        .and_then(|id| camera_ids.iter().position(|candidate| *candidate == id))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let options: Vec<&str> = camera_options.iter().map(String::as_str).collect();
+    inputs.add(&combo_row(
+        "Camera",
+        if cameras.is_empty() { "No camera was found." } else { "Recorded beside the screen for the video editor." },
+        &options,
+        selected_camera,
+        move |index| {
+            let value = if index == 0 { String::new() } else { camera_ids.get(index - 1).cloned().unwrap_or_default() };
+            App::get().set_pref(keys::RECORDING_CAMERA_DEVICE_ID, value);
+        },
+    ));
+    page.add(&inputs);
     page
 }
 

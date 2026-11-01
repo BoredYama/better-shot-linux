@@ -604,6 +604,9 @@ fn open_item(gallery: &Rc<Gallery>, item: &GalleryItem) {
         show_message(gallery, "This file was moved or deleted. Refresh the gallery.");
         return;
     }
+    if item.kind == CaptureKind::Recording && crate::recording_card::show_existing(&App::get(), &item.capture) {
+        return;
+    }
     let path = if item.preview.exists() { item.preview.clone() } else { item.capture.clone() };
     deck_ui::show_existing(&App::get(), &path);
 }
@@ -675,6 +678,9 @@ fn delete_local(gallery: &Rc<Gallery>, item: &GalleryItem) {
         Ok(()) => {
             deck_ui::forget(&item.preview);
             deck_ui::forget(&item.capture);
+            for path in &item.deletion_paths {
+                crate::recording_card::forget(path);
+            }
             refresh(gallery);
         }
         Err(error) => show_message(gallery, &format!("Couldn’t move “{}” to Trash. {error} Try again.", item.title)),

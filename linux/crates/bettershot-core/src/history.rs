@@ -139,8 +139,12 @@ impl HistoryStore {
 
     fn pixel_size(path: &Path, kind: CaptureKind) -> (i64, i64) {
         match kind {
-            // Recordings get their size from the media layer in a later phase.
-            CaptureKind::Recording => (0, 0),
+            // A recording package's manifest knows its size; bare movies
+            // outside a package report none until the media layer reads them.
+            CaptureKind::Recording => crate::recording::RecordingSession::containing(path)
+                .and_then(|session| session.load_capture_manifest())
+                .map(|manifest| (manifest.pixel_width, manifest.pixel_height))
+                .unwrap_or((0, 0)),
             CaptureKind::Screenshot => {
                 let (width, height) = imaging::pixel_size(path);
                 (i64::from(width), i64::from(height))

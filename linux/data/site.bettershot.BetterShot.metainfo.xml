@@ -22,6 +22,11 @@
       gradient or image backgrounds, padding, rounded corners, and shadows.
       Edits stay editable after saving.
     </p>
+    <p>
+      Record a display, a window, or an area, with system audio, a microphone,
+      and a camera, then save the recording as MP4 or keep it in the Media
+      Gallery.
+    </p>
   </description>
   <launchable type="desktop-id">site.bettershot.BetterShot.desktop</launchable>
   <url type="homepage">https://bettershot.site</url>

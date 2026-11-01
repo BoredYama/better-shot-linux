@@ -22,6 +22,13 @@ pub const AVAILABLE_GLOBAL_ACTIONS: &[Action] = &[
     Action::Ocr,
     Action::OcrSingleLine,
     Action::ColorPicker,
+    Action::Recording,
+    Action::RecordingOptions,
+    Action::RecordArea,
+    Action::StopRecording,
+    Action::PauseRecording,
+    Action::RestartRecording,
+    Action::DiscardRecording,
 ];
 
 /// The icons folder when running from a source checkout, so the clover icon
@@ -52,7 +59,17 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         command: TrayCommand::Capture(action),
         shortcut: shortcut_label(app, action),
     };
-    vec![
+    let mut entries = Vec::new();
+    if crate::recording::is_active() {
+        let paused = crate::recording::is_paused();
+        entries.push(entry("Stop Recording", "media-playback-stop-symbolic", Action::StopRecording));
+        entries.push(entry(
+            if paused { "Resume Recording" } else { "Pause Recording" },
+            if paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" },
+            Action::PauseRecording,
+        ));
+    }
+    entries.extend([
         entry("Capture Region", "bettershot-region-symbolic", Action::Region),
         entry("Capture Screen", "video-display-symbolic", Action::Fullscreen),
         entry("Capture Window", "window-new-symbolic", Action::Window),
@@ -61,6 +78,7 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
         entry("Scrolling Capture", "view-continuous-symbolic", Action::ScrollCapture),
         entry("Capture Text", "insert-text-symbolic", Action::Ocr),
         entry("Pick Color", "color-select-symbolic", Action::ColorPicker),
+        entry("Record Screen…", "media-record-symbolic", Action::Recording),
         TrayEntry {
             label: "Media Gallery".into(),
             icon: "folder-pictures-symbolic",
@@ -85,7 +103,8 @@ fn tray_entries(app: &App) -> Vec<TrayEntry> {
             command: TrayCommand::Quit,
             shortcut: None,
         },
-    ]
+    ]);
+    entries
 }
 
 pub fn start_tray(app: &App) {
@@ -120,7 +139,7 @@ pub fn stop_tray(app: &App) {
     }
 }
 
-fn refresh_tray(app: &App) {
+pub fn refresh_tray(app: &App) {
     let entries = tray_entries(app);
     if let Some(tray) = app.state().tray.as_ref() {
         tray.set_entries(entries);

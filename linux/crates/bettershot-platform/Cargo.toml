@@ -12,7 +12,11 @@ ashpd.workspace = true
 async-channel.workspace = true
 bettershot-core.workspace = true
 futures-util.workspace = true
+gst.workspace = true
+gst-app.workspace = true
+gst-pbutils.workspace = true
 gtk.workspace = true
+image.workspace = true
 ksni.workspace = true
 oo7.workspace = true
 serde_json.workspace = true
@@ -22,7 +26,6 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-image.workspace = true
 tempfile.workspace = true
 
 [lints]

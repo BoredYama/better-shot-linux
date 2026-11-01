@@ -31,6 +31,15 @@ pub fn copy_file(copy: &Path) -> Result<(), String> {
     display.clipboard().set_content(Some(&provider)).map_err(|e| e.to_string())
 }
 
+/// Puts only a file reference on the clipboard, for videos and other files
+/// that are not images.
+pub fn copy_file_reference(path: &Path) -> Result<(), String> {
+    let display = gdk::Display::default().ok_or("No display is available.")?;
+    let files = gdk::FileList::from_array(&[gio::File::for_path(path)]);
+    let provider = gdk::ContentProvider::for_value(&files.to_value());
+    display.clipboard().set_content(Some(&provider)).map_err(|e| e.to_string())
+}
+
 /// A file named after the capture for drag and drop.
 pub fn drag_provider(app: &App, path: &Path) -> Option<gdk::ContentProvider> {
     let copy = {

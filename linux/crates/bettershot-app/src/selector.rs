@@ -49,6 +49,7 @@ type SharedRef = Rc<RefCell<Shared>>;
 pub const CAPTURE_HINT: &str = "Drag to select an area · Enter to capture · Esc to cancel";
 pub const SCROLL_HINT: &str = "Drag over the area to scroll · Enter to start · Esc to cancel";
 pub const TEXT_HINT: &str = "Drag over text to copy it · Esc to cancel";
+pub const RECORD_HINT: &str = "Drag to select the area to record · Enter to start · Esc to cancel";
 
 const DIM: f64 = 0.45;
 const HANDLE_RADIUS: f64 = 4.5;

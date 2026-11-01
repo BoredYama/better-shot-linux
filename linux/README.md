@@ -5,13 +5,14 @@ Swift sources in `../Sources` remain the reference implementation; the
 [port plan](../docs/linux-port-plan.md) describes the stack, phases, and
 Wayland constraints.
 
-**Status:** Phase 4, screenshots, the image editor, capture extras, sharing,
-and the library. Capture an area, the screen, a window, the previous area, or a
-scrolling area; copy, save, drag, pin, share, or edit captures from the capture
-deck; annotate and frame them in the editor, with smart redaction of sensitive
-text; copy text from the screen with OCR; pick colors; share links through
-your own Cloudflare R2 bucket; and browse everything in the Media Gallery.
-Recording comes in a later phase.
+**Status:** Phase 5, screenshots, the image editor, capture extras, sharing,
+the library, and screen recording. Capture an area, the screen, a window, the
+previous area, or a scrolling area; copy, save, drag, pin, share, or edit
+captures from the capture deck; annotate and frame them in the editor, with
+smart redaction of sensitive text; copy text from the screen with OCR; pick
+colors; share links through your own Cloudflare R2 bucket; browse everything
+in the Media Gallery; and record a display, window, or area with audio and a
+camera. The video editor comes in a later phase.
 
 ## Install from source
 
@@ -22,13 +23,20 @@ most desktops install by default. Capture Text and smart redaction use
 [Tesseract](https://github.com/tesseract-ocr/tesseract) 4 or later with a
 language pack; `zbarimg` (zbar-tools), if installed, also reads QR codes and
 barcodes. Cloud sharing stores its keys with a Secret Service provider (GNOME
-Keyring, KWallet, or KeePassXC), which desktops normally run.
+Keyring, KWallet, or KeePassXC), which desktops normally run. Screen
+recording needs GStreamer 1.20 or later with its PipeWire source, an H.264
+encoder (x264, VA-API, or OpenH264), an AAC or Opus encoder, and the
+ScreenCast portal that desktops ship for screen sharing.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install build-essential libgtk-4-dev libadwaita-1-dev tesseract-ocr tesseract-ocr-eng
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev tesseract-ocr tesseract-ocr-eng \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire \
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
 # Fedora
-sudo dnf install gtk4-devel libadwaita-devel tesseract tesseract-langpack-eng
+sudo dnf install gtk4-devel libadwaita-devel tesseract tesseract-langpack-eng \
+  gstreamer1-devel gstreamer1-plugins-base-devel pipewire-gstreamer \
+  gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-openh264
 ```
 
 ```bash
@@ -52,10 +60,13 @@ Then open BetterShot from your app menu. `make uninstall` removes it.
 | `bettershot capture scroll` | Capture an area while you scroll it; run it again to finish |
 | `bettershot capture text` | Select an area and copy its text (`text-single-line` joins the lines) |
 | `bettershot capture color` | Pick a color on screen and copy its hex value |
+| `bettershot record` | Open the capture bar, with the recording sources and input toggles |
+| `bettershot record display` / `window` / `area` | Start recording; `area` selects it first |
+| `bettershot record stop` / `pause` / `restart` / `discard` | Control the running recording (`restart` and `discard` ask first) |
 | `bettershot edit FILE` | Open an image in the editor (also "Open With" for PNG and JPEG) |
 | `bettershot open-image` | Choose an image to edit |
 | `bettershot gallery` | Open the Media Gallery |
-| `bettershot bettershot://capture/region` | Run a BetterShot URL (also `capture/scroll`, `ocr`, `color-picker`) |
+| `bettershot bettershot://capture/region` | Run a BetterShot URL (also `capture/scroll`, `record`, `ocr`, `color-picker`) |
 | `bettershot quit` | Quit the running instance |
 
 Right-clicking BetterShot in a dock or app grid offers the same captures.
@@ -147,6 +158,22 @@ Cancel discards it. A pinned header, such as a toolbar, appears once, and a
 frame that doesn't overlap is skipped, so scroll back a little and add it
 again.
 
+**Screen recording** starts from the capture bar (Super+Shift+2, the tray's
+Record Screen…, or `bettershot record`). Its picker row offers the screenshot
+modes, then Display, Window, and Area, then Camera, Mic, and Audio toggles and
+a Timer. Display and Window open your desktop's screen-sharing dialog to pick
+the source (later recordings reuse your choice); Area selects an area from a
+still frame and records that part of its display. While recording, the bar
+becomes a row with Stop and the elapsed time, Pause/Resume, Start Over, and
+Discard; the last two ask first. Stop puts a card with the recording's first
+frame and length on screen: Save writes an MP4 to your save folder and
+replaces it on later saves, Copy puts the file on the clipboard, Open plays
+it, and Delete removes the project. Settings › Recording sets a countdown,
+the frame rate, automatic saving, system audio, the microphone, and the
+camera. Recordings are kept as projects in `~/.local/share/bettershot/Recordings`
+in the macOS app's package format, listed in the Media Gallery, and written so
+that a crash leaves them playable; the next launch recovers interrupted ones.
+
 ### Keyboard shortcuts
 
 BetterShot asks your desktop for global shortcuts through the GlobalShortcuts
@@ -163,7 +190,21 @@ for example `bettershot capture region`.
 
 - **Upload progress** advances per file (the capture, its poster, and the
   manifest) rather than continuously, because R2 needs each file's size up
-  front. Video shares arrive with recording.
+  front. Recordings cannot be shared yet.
+- **The capture bar appears in display recordings.** Wayland cannot keep an
+  app's own windows out of a screen share, so move the bar off the recorded
+  area, record a window, or stop with the tray or a shortcut.
+- **The cursor is recorded as pixels.** GStreamer's PipeWire source drops the
+  stream's cursor metadata, so recordings have no separate pointer timeline;
+  cursor restyling and click effects come with the video editor.
+- **Recordings are saved as recorded.** Until the video editor is ported, Save
+  converts the screen movie to MP4 without re-encoding; the camera movie stays
+  in the project, and macOS projects with edits are saved without them.
+- **Area recordings** are cropped from the display your desktop's dialog
+  shares. Pick the display that holds the area; if it does not, the whole
+  display is recorded.
+- **Cameras** are read through V4L2, which a Flatpak build will need the
+  Camera portal for.
 
 - **Scrolling capture is manual.** macOS adds frames on its own as you scroll
   and auto-scrolls. Wayland gives apps neither scroll events from other apps
@@ -200,7 +241,7 @@ for example `bettershot capture region`.
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
 | [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas and every export |
-| [`bettershot-platform`](crates/bettershot-platform) | Screenshot and GlobalShortcuts portals, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
+| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, the GStreamer recorder and media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
 
 ### What `bettershot-core` covers
@@ -214,6 +255,7 @@ Each module names the Swift file it ports. Keep the two in step.
 | `text_recognition` | `ImageTextRecognizer.swift`, `SmartRedactionRecognizer.swift`, and `ColorPickerOverlay.hexFromColor`: Tesseract output, sensitive-text rules, hex colors |
 | `scroll_capture` | `ScrollFrameAnalyzer.swift` and `ScrollCaptureController`'s registration and merge rules (adapted from MacShot, GPLv3) |
 | `pin` | `PinnedScreenshot.swift`: pin size and scroll-scaling |
+| `recording` | `RecordingSession.swift`, `RecordingProject.swift`, `RecordingDeliverable.swift`, `RecordingRecoveryCoordinator.swift`, and `ScreenRecordingManager`'s state and clock: the package, its sidecars, deliverable naming and saving, recovery |
 | `deck` | `DeckStaging.swift`, `ScreenshotFileActions`, and `CaptureOrchestrator`'s staging and after-capture decisions |
 | `history` | `HistoryStore.swift`: the library, `history.json`, and retention |
 | `imaging` | `FrozenScreenFrame.swift`, image encoding, and atomic, collision-free writes |
@@ -277,7 +319,8 @@ make check-ui     # drive the real app under Xvfb with a fixture screen
 ```
 
 `make check-ui` needs Xvfb, Openbox, xdotool, xclip, ImageMagick,
-`dbus-run-session`, Python with Pillow, and Tesseract. It also runs a fake R2
+`dbus-run-session`, Python with Pillow, Tesseract, and `gst-discoverer-1.0`
+(gstreamer1.0-plugins-base-apps). It also runs a fake R2
 bucket on 127.0.0.1 with fixture keys, so it never touches real credentials. It runs region capture
 with automatic saving on and off, Escape, the card's Save button with Settings
 open, Capture Previous Region, Hide After, the editor (drawing shapes and text,
@@ -287,7 +330,9 @@ must leave the clipboard alone), Pick Color, smart redaction, Capture Region &
 Pin (scaling, the context menu, Ctrl+W), a scrolling capture stitched from
 fixture frames, sharing from a card and from the editor, the Sharing settings,
 the Media Gallery (cloud list, Delete Cloud Share, Move to Trash), first-run
-setup, and What's New, in light and dark appearances.
+setup, What's New, and recording (the bar, an area recording with Pause, the
+card and automatic MP4 saving, Discard's confirmation, and recovery of an
+interrupted package at launch), in light and dark appearances.
 `BETTERSHOT_UI_ONLY=text,scroll` runs only the named scenarios. Each step's screenshot
 lands in `target/ui-snapshots/`. It replaces the portal with a fixture image,
 so it cannot check real portals, Wayland compositors, global shortcuts, the
@@ -300,6 +345,9 @@ writes a render of every shape and background feature to
 Tests run with `BETTERSHOT_TESTING=1`, which keeps every file in a temporary
 folder, and `BETTERSHOT_FAKE_SCREEN` (honored only in testing) substitutes the
 screenshot; a folder of images plays them in name order, one per screenshot.
+Recording plays the same image as a live stream, with silent audio and a test
+pattern for the camera, so `BETTERSHOT_TESTING=1 BETTERSHOT_FAKE_SCREEN=... cargo test -p bettershot-platform`
+also exercises the encoder pipeline, pause, cropping, and MP4 conversion.
 In testing, R2 keys come from `config/test-r2-keys.json` instead of the
 keyring, `BETTERSHOT_R2_ENDPOINT` points uploads at a local fake, and Move to
 Trash uses a private folder. The crate versions must match `version.json`; a test enforces it.

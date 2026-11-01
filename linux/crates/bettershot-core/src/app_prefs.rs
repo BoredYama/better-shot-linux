@@ -9,6 +9,7 @@ use crate::imaging::{EncodeOptions, ExportFormat};
 use crate::overlay_layout::OverlayToolLayout;
 use crate::paths::AppDirs;
 use crate::prefs::Preferences;
+use crate::recording::SourceMode;
 use std::io;
 use std::path::PathBuf;
 
@@ -31,6 +32,16 @@ pub mod keys {
     pub const CAPTURE_REGION_ON_RELEASE: &str = "bs_captureRegionOnRelease";
     pub const PRESELECT_PREVIOUS_REGION: &str = "bs_preselectPreviousRegion";
     pub const SHOW_IN_MENU_BAR: &str = "bs_showInMenuBar";
+    /// Recording keys match `AppPreferences.swift` and `BetterShotPreferences.swift`.
+    pub const RECORDING_START_DELAY: &str = "bs_recordingStartDelaySeconds";
+    pub const OPEN_EDITOR_AFTER_RECORDING: &str = "bs_openEditorAfterRecording";
+    pub const RECORDING_SYSTEM_AUDIO: &str = "recordingSystemAudio";
+    pub const RECORDING_MICROPHONE_DEVICE_ID: &str = "recordingMicrophoneDeviceID";
+    pub const RECORDING_CAMERA_DEVICE_ID: &str = "recordingCameraDeviceID";
+    /// Linux only: frames per second written to the screen movie.
+    pub const RECORDING_FRAME_RATE: &str = "bs_recordingFrameRate";
+    /// Linux only: the source mode the recording bar last used.
+    pub const RECORDING_SOURCE_MODE: &str = "bs_recordingSourceMode";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -236,7 +247,49 @@ impl AppPreferences<'_> {
     pub fn default_beautifier_config(&self) -> BeautifierConfig {
         self.prefs.decode(DEFAULT_BEAUTIFIER_CONFIG_KEY).unwrap_or_default()
     }
+
+    // MARK: - Recording
+
+    /// Countdown before a recording starts; 0 is off.
+    pub fn recording_start_delay_seconds(&self) -> i64 {
+        self.prefs.integer(keys::RECORDING_START_DELAY).max(0)
+    }
+
+    pub fn open_editor_after_recording(&self) -> bool {
+        self.prefs.optional_bool(keys::OPEN_EDITOR_AFTER_RECORDING).unwrap_or(false)
+    }
+
+    /// Whether recordings include what the computer plays. Defaults to off.
+    pub fn recording_system_audio(&self) -> bool {
+        self.prefs.bool(keys::RECORDING_SYSTEM_AUDIO)
+    }
+
+    /// The microphone recorded alongside the screen; empty means off.
+    pub fn recording_microphone_device_id(&self) -> Option<String> {
+        self.prefs.string(keys::RECORDING_MICROPHONE_DEVICE_ID).filter(|id| !id.is_empty()).map(str::to_owned)
+    }
+
+    /// The camera recorded alongside the screen; empty means off.
+    pub fn recording_camera_device_id(&self) -> Option<String> {
+        self.prefs.string(keys::RECORDING_CAMERA_DEVICE_ID).filter(|id| !id.is_empty()).map(str::to_owned)
+    }
+
+    pub fn recording_frame_rate(&self) -> i64 {
+        let value = self.prefs.integer(keys::RECORDING_FRAME_RATE);
+        if RECORDING_FRAME_RATE_CHOICES.contains(&value) {
+            value
+        } else {
+            30
+        }
+    }
+
+    pub fn recording_source_mode(&self) -> SourceMode {
+        self.prefs.string(keys::RECORDING_SOURCE_MODE).and_then(SourceMode::from_raw_value).unwrap_or_default()
+    }
 }
+
+/// Frame rates the Recording settings offer.
+pub const RECORDING_FRAME_RATE_CHOICES: [i64; 3] = [24, 30, 60];
 
 /// Remembers the area chosen with BetterShot's selector for Capture Previous Region.
 pub fn set_last_region_rect(prefs: &mut Preferences, rect: Rect) -> io::Result<()> {

@@ -67,6 +67,15 @@ pub fn collect(history: &HistoryStore) -> Vec<GalleryItem> {
             if display != capture {
                 deletion_paths.push(display);
             }
+            // A recording package is one unit: its poster is the preview and
+            // Move to Trash takes the whole folder.
+            let mut preview = preview;
+            if let Some(session) = crate::recording::RecordingSession::containing(&capture) {
+                if session.poster_path().exists() {
+                    preview = session.poster_path();
+                }
+                deletion_paths = vec![session.directory.clone()];
+            }
             GalleryItem {
                 id: record.id,
                 title: record.display_name().to_owned(),

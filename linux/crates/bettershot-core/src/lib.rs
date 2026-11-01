@@ -21,6 +21,7 @@ pub mod paths;
 pub mod pin;
 pub mod prefs;
 pub mod r2;
+pub mod recording;
 pub mod region;
 pub mod release_notes;
 pub mod scroll_capture;

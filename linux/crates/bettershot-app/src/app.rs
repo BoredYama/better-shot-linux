@@ -175,6 +175,7 @@ pub fn startup(application: &adw::Application) {
     install_actions(&app);
     crate::sharing::load(&app);
     services::start(&app);
+    crate::recording::recover_interrupted(&app);
     // Pending setup first, otherwise unread release notes.
     if onboarding::should_present(&app.state().prefs) {
         crate::onboarding_ui::present(&app, false);
@@ -190,7 +191,12 @@ fn install_actions(app: &App) {
     app.application.set_accels_for_action("app.quit", &["<Control>q"]);
 }
 
+/// Finishes an active recording (keeping its footage) before quitting.
 pub fn quit_app() {
+    crate::recording::finish_for_quit(quit_now);
+}
+
+fn quit_now() {
     let app = App::get();
     if let Some(tray) = app.state_mut().tray.take() {
         tray.shutdown();
@@ -229,6 +235,7 @@ fn run(_application: &adw::Application, command: Command, cwd: Option<std::path:
         Command::Activate | Command::Settings => settings::present(&app),
         Command::Background => {}
         Command::Capture(action) => capture::perform(action),
+        Command::Record(mode) => crate::recording::start(mode),
         Command::Edit(path) => {
             // A relative path is relative to the invoking process's folder.
             let path = std::path::PathBuf::from(path);

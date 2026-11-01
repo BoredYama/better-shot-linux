@@ -2,6 +2,7 @@
 //! instance over D-Bus (GApplication), so desktop keyboard shortcuts can run
 //! `bettershot capture region` where the GlobalShortcuts portal is missing.
 
+use bettershot_core::recording::SourceMode;
 use bettershot_core::shortcuts::Action;
 use bettershot_core::url_action::CaptureUrlAction;
 
@@ -12,6 +13,8 @@ pub enum Command {
     /// Started at login: stay in the tray.
     Background,
     Capture(Action),
+    /// Start recording a display, window, or area.
+    Record(SourceMode),
     /// Open an image in the editor.
     Edit(String),
     /// Choose an image to open in the editor.
@@ -40,12 +43,26 @@ pub const CAPTURE_COMMANDS: &[(&str, Action, &str)] = &[
     ("color", Action::ColorPicker, "Pick a color and copy its hex value"),
 ];
 
+/// Recording subcommands (`bettershot record ...`), their actions, and help text.
+pub const RECORD_COMMANDS: &[(&str, Action, &str)] = &[
+    ("", Action::Recording, "Open the capture and recording bar"),
+    ("options", Action::RecordingOptions, "Open the capture and recording bar"),
+    ("area", Action::RecordArea, "Select an area and record it"),
+    ("stop", Action::StopRecording, "Stop and save the recording"),
+    ("pause", Action::PauseRecording, "Pause or resume the recording"),
+    ("restart", Action::RestartRecording, "Start the recording over (asks first)"),
+    ("discard", Action::DiscardRecording, "Discard the recording (asks first)"),
+];
+
 /// The command a desktop keyboard shortcut should run for an action.
 pub fn command_for(action: Action) -> Option<String> {
-    CAPTURE_COMMANDS
+    if let Some((name, _, _)) = CAPTURE_COMMANDS.iter().find(|(_, candidate, _)| *candidate == action) {
+        return Some(format!("bettershot capture {name}"));
+    }
+    RECORD_COMMANDS
         .iter()
         .find(|(_, candidate, _)| *candidate == action)
-        .map(|(name, _, _)| format!("bettershot capture {name}"))
+        .map(|(name, _, _)| format!("bettershot record {name}").trim_end().to_owned())
 }
 
 pub fn help() -> String {
@@ -55,6 +72,10 @@ pub fn help() -> String {
     for (name, _, description) in CAPTURE_COMMANDS {
         text.push_str(&format!("  {:<27}{description}\n", format!("capture {name}")));
     }
+    for (name, _, description) in RECORD_COMMANDS.iter().filter(|(name, _, _)| *name != "options") {
+        text.push_str(&format!("  {:<27}{description}\n", format!("record {name}").trim_end()));
+    }
+    text.push_str("  record display|window     Record the whole screen or an app window\n");
     text.push_str("  bettershot://...           Run a BetterShot URL, e.g. bettershot://capture/region\n");
     text.push_str("  --help, --version\n");
     text
@@ -73,6 +94,14 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         ["gallery"] => Ok(Command::Gallery),
         ["edit", path] => Ok(Command::Edit((*path).to_owned())),
         ["quit"] => Ok(Command::Quit),
+        ["record"] => Ok(Command::Capture(Action::Recording)),
+        ["record", "display"] => Ok(Command::Record(SourceMode::Fullscreen)),
+        ["record", "window"] => Ok(Command::Record(SourceMode::Window)),
+        ["record", name] => RECORD_COMMANDS
+            .iter()
+            .find(|(candidate, _, _)| candidate == name)
+            .map(|(_, action, _)| Command::Capture(*action))
+            .ok_or_else(|| format!("Unknown recording command \"{name}\".\n\n{}", help())),
         ["capture", name] => CAPTURE_COMMANDS
             .iter()
             .find(|(candidate, _, _)| candidate == name)
@@ -123,7 +152,7 @@ fn from_url_action(action: CaptureUrlAction) -> Result<Command, String> {
         CaptureUrlAction::Window => Command::Capture(Action::Window),
         CaptureUrlAction::Settings => Command::Settings,
         CaptureUrlAction::ScrollCapture => Command::Capture(Action::ScrollCapture),
-        CaptureUrlAction::Recording => return Err("Screen recording is not available on Linux yet.".into()),
+        CaptureUrlAction::Recording => Command::Capture(Action::RecordingOptions),
         CaptureUrlAction::Ocr => Command::Capture(Action::Ocr),
         CaptureUrlAction::ColorPicker => Command::Capture(Action::ColorPicker),
     })
@@ -158,7 +187,7 @@ mod tests {
         assert_eq!(parse_str(&["BETTERSHOT://CAPTURE/fullscreen"]), Ok(Command::Capture(Action::Fullscreen)));
         assert_eq!(parse_str(&["bettershot://settings"]), Ok(Command::Settings));
         assert!(parse_str(&["bettershot://capture/region?x=1"]).is_err(), "malformed URLs are rejected");
-        assert!(parse_str(&["bettershot://record"]).unwrap_err().contains("not available"));
+        assert_eq!(parse_str(&["bettershot://record"]), Ok(Command::Capture(Action::RecordingOptions)));
         assert_eq!(parse_str(&["bettershot://ocr"]), Ok(Command::Capture(Action::Ocr)));
         assert_eq!(parse_str(&["bettershot://capture/scroll"]), Ok(Command::Capture(Action::ScrollCapture)));
         assert_eq!(parse_str(&["bettershot://color-picker"]), Ok(Command::Capture(Action::ColorPicker)));
@@ -177,5 +206,21 @@ mod tests {
             assert_eq!(parse_str(&["capture", name]), Ok(Command::Capture(*action)));
         }
         assert!(help().contains("capture previous-region"));
+    }
+
+    #[test]
+    fn record_commands() {
+        assert_eq!(parse_str(&["record"]), Ok(Command::Capture(Action::Recording)));
+        assert_eq!(parse_str(&["record", "display"]), Ok(Command::Record(SourceMode::Fullscreen)));
+        assert_eq!(parse_str(&["record", "window"]), Ok(Command::Record(SourceMode::Window)));
+        assert_eq!(parse_str(&["record", "area"]), Ok(Command::Capture(Action::RecordArea)));
+        assert_eq!(parse_str(&["record", "stop"]), Ok(Command::Capture(Action::StopRecording)));
+        assert!(parse_str(&["record", "nope"]).is_err());
+        assert_eq!(command_for(Action::Recording).as_deref(), Some("bettershot record"));
+        assert_eq!(command_for(Action::PauseRecording).as_deref(), Some("bettershot record pause"));
+        for (name, action, _) in RECORD_COMMANDS.iter().filter(|(name, _, _)| !name.is_empty()) {
+            assert_eq!(parse_str(&["record", name]), Ok(Command::Capture(*action)));
+        }
+        assert!(help().contains("record stop") && help().contains("record display|window"));
     }
 }

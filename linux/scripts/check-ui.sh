@@ -4,7 +4,8 @@
 # to target/ui-snapshots/ for review in light and dark appearances.
 #
 # Needs: Xvfb, Openbox, xdotool, xclip, ImageMagick (import), dbus-run-session,
-# python3 + Pillow, and Tesseract (tesseract-ocr) for the text scenarios. Openbox provides real window-manager focus and stacking.
+# python3 + Pillow, Tesseract (tesseract-ocr) for the text scenarios, and
+# gst-discoverer-1.0 (gstreamer1.0-plugins-base-apps) for the recording scenario. Openbox provides real window-manager focus and stacking.
 # Run from linux/ after `cargo build`: bash scripts/check-ui.sh
 # (BETTERSHOT_UI_ONLY=text,color runs only the named scenarios.)
 #
@@ -23,7 +24,7 @@ SMART_X=588
 CARD_SHARE_X=309
 CARD_SHARE_Y=209
 EDITOR_SHARE_X=939
-SETTINGS_SHARING_X=515
+SETTINGS_SHARING_X=554
 # The gallery's Cloud Shares > All Media row and the first card's actions button.
 GALLERY_CLOUD_X=80
 GALLERY_CLOUD_Y=262
@@ -33,6 +34,8 @@ GALLERY_MENU_Y=88
 GALLERY_MENU2_X=723
 GALLERY_DELETE_Y=312
 GALLERY_CONFIRM_X=599
+# Settings tabs sit along the bottom of the 720x640 window: General 68,
+# Capture 166, Recording 263, Capture Deck 360, Shortcuts 457, Sharing 554, About 651.
 # Settings › About › What's New, in window coordinates.
 ABOUT_WHATS_NEW_Y=400
 GALLERY_CONFIRM_Y=395
@@ -124,10 +127,11 @@ inside() {
       [[ $(size_of "$(saved_files | tail -1)") == 320x220 ]] || fail "previous region size differs"
       ;;
     manual)
-      settings_tab 205; shot "$SCENARIO-$APPEARANCE-1b-settings-capture"
-      settings_tab 308; shot "$SCENARIO-$APPEARANCE-1c-settings-deck"
-      settings_tab 411; shot "$SCENARIO-$APPEARANCE-1d-settings-shortcuts"
-      settings_tab 102
+      settings_tab 166; shot "$SCENARIO-$APPEARANCE-1b-settings-capture"
+      settings_tab 263; shot "$SCENARIO-$APPEARANCE-1c-settings-recording"
+      settings_tab 360; shot "$SCENARIO-$APPEARANCE-1d-settings-deck"
+      settings_tab 457; shot "$SCENARIO-$APPEARANCE-1e-settings-shortcuts"
+      settings_tab 68
       "$BIN" capture region; sleep 1.5
       select_area; xdotool key Escape; sleep 1
       [[ -z $(find "$BETTERSHOT_TEST_ROOT/data" -name '*.png' 2>/dev/null) ]] || fail "a cancelled selection left files"
@@ -425,7 +429,7 @@ PY
       # No Linux release lists this version yet, so an upgrade shows nothing at
       # launch; Settings › About › What's New shows the Unreleased changes.
       [[ -z "$(window_titled '*New in BetterShot')" ]] || fail "release notes opened without a release entry"
-      settings_tab 617; sleep 0.6
+      settings_tab 651; sleep 0.6
       shot "$SCENARIO-$APPEARANCE-2-about"
       eval "$(xdotool getwindowgeometry --shell "$(xdotool search --onlyvisible --name 'BetterShot Settings' | head -1)")"
       click_at $((X + 360)) $((Y + ABOUT_WHATS_NEW_Y)); sleep 1
@@ -435,6 +439,66 @@ PY
       shot "$SCENARIO-$APPEARANCE-3-notes"
       xdotool key Escape; sleep 0.6
       [[ -z "$(window_titled '*New in BetterShot')" ]] || fail "Escape did not close What's New"
+      ;;
+    record)
+      # The fixture image plays as the screen stream; the portal is not used.
+      "$BIN" record; sleep 1.5
+      [[ -n "$(window_titled 'Capture Bar')" ]] || fail "the capture bar did not open"
+      shot "$SCENARIO-$APPEARANCE-2-bar"
+      "$BIN" record area; sleep 1.5
+      drag_to 700 120 1180 760
+      shot "$SCENARIO-$APPEARANCE-3-area"
+      xdotool key Return; sleep 3
+      [[ -n "$(window_titled 'Capture Bar')" ]] || fail "the recording bar is not showing"
+      shot "$SCENARIO-$APPEARANCE-4-recording"
+      "$BIN" record pause; sleep 1.5
+      shot "$SCENARIO-$APPEARANCE-5-paused"
+      "$BIN" record pause; sleep 1.5
+      "$BIN" record stop; sleep 4
+      shot "$SCENARIO-$APPEARANCE-6-card"
+      [[ -z "$(window_titled 'Capture Bar')" ]] || fail "the bar stayed after Stop"
+      [[ -n "$(window_titled 'Recordings')" ]] || fail "no recording card appeared"
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" && -f "$package/screen.mov" && -f "$package/capture.json" && -f "$package/poster.jpg" && -f "$package/input.json" ]] || fail "the package is incomplete: $(ls "$package" 2>/dev/null)"
+      [[ $(saved_files | wc -l) -eq 1 && "$(saved_files)" == *.mp4 ]] || fail "automatic saving wrote $(saved_files | wc -l) files"
+      python3 - "$package/capture.json" "$BETTERSHOT_TEST_ROOT/data/Library/history.json" <<'PY' || fail "the manifest or library entry is wrong"
+import json, sys
+m = json.load(open(sys.argv[1]))
+print(m, file=sys.stderr)
+ok = (m["pixelWidth"], m["pixelHeight"]) == (480, 640) and 2.0 < m["duration"] < 5.0 and m["pointerSynthesized"] is False
+records = json.load(open(sys.argv[2]))
+ok = ok and any(r["kind"] == "recording" and r["pixelWidth"] == 480 for r in records)
+sys.exit(0 if ok else 1)
+PY
+      local probe; probe="$(gst-discoverer-1.0 "$(saved_files)" 2>/dev/null || true)"
+      [[ "$probe" == *"Width: 480"* && "$probe" == *"Height: 640"* && "$probe" == *"H.264 (High Profile)"* ]] || fail "the saved MP4 is not 480x640 H.264 High: $probe"
+      # Discard asks first; Cancel keeps recording, Discard removes the package.
+      "$BIN" record display; sleep 3
+      "$BIN" record discard; sleep 1.2
+      shot "$SCENARIO-$APPEARANCE-7-discard-confirm"
+      xdotool key Escape; sleep 1
+      [[ -n "$(window_titled 'Capture Bar')" ]] || fail "Cancel ended the recording"
+      [[ $(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | wc -l) -eq 2 ]] || fail "the second recording has no package"
+      "$BIN" record discard; sleep 1.2
+      xdotool key shift+Tab; sleep 0.2; xdotool key Return; sleep 3
+      [[ -z "$(window_titled 'Capture Bar')" ]] || fail "Discard did not finish"
+      [[ $(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | wc -l) -eq 1 ]] || fail "Discard kept the package"
+      [[ $(saved_files | wc -l) -eq 1 ]] || fail "a discarded recording was saved"
+      # A package without a manifest is an interrupted recording: the next
+      # launch recovers its playable footage into the library.
+      "$BIN" quit; sleep 1
+      local interrupted="$BETTERSHOT_TEST_ROOT/data/Recordings/BetterShot_interrupted_ABCDEF.bettershotrec"
+      mkdir -p "$interrupted" && cp "$package/screen.mov" "$interrupted/screen.mov"
+      "$BIN" >>"$BETTERSHOT_TEST_ROOT/app.log" 2>&1 &
+      sleep 4
+      [[ -f "$interrupted/capture.json" && -f "$interrupted/poster.jpg" ]] || fail "the interrupted recording was not recovered"
+      [[ $(grep -o '"kind":"recording"' "$BETTERSHOT_TEST_ROOT/data/Library/history.json" | wc -l) -eq 2 ]] || fail "the recovered recording is not in the library"
+      # The gallery shows both recordings; Open shows a card.
+      "$BIN" gallery; sleep 2.5
+      local gallery; gallery="$(window_titled 'Media Gallery')"
+      [[ -n "$gallery" ]] || fail "the Media Gallery did not open"
+      xdotool windowactivate --sync "$gallery" 2>/dev/null || true; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-8-gallery"
       ;;
     hide)
       "$BIN" capture region; sleep 1.5
@@ -572,5 +636,8 @@ done
 for appearance in light dark; do
   scenario color "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
   scenario redact "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
+done
+for appearance in light dark; do
+  scenario record "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": true}"
 done
 echo "Snapshots: $OUT"

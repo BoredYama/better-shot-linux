@@ -138,10 +138,10 @@ fn permissions() -> (gtk::Widget, gtk::Label, gtk::Label) {
         let status = status.clone();
         let button = button.clone();
         glib::spawn_future_local(async move {
-            let app = App::get();
-            let folder = app.state().dirs.scratch_folder("Onboarding");
-            let result = bettershot_platform::screenshot::capture_screen(None, &folder).await;
-            let _ = std::fs::remove_dir_all(&folder);
+            // The same still-frame path captures use: the X server, the
+            // screen-sharing stream (whose one-time dialog belongs here), or
+            // the screenshot portal.
+            let result = crate::capture::frozen_screen(&App::get()).await;
             button.set_sensitive(true);
             status.set_label(match result {
                 Ok(_) => "Allowed",

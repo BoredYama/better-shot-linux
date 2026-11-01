@@ -15,6 +15,7 @@ use bettershot_core::shortcuts::Action;
 use bettershot_core::text_recognition;
 use bettershot_platform::screen_stream::{self, ScreenStream};
 use bettershot_platform::screenshot::{self, CaptureError};
+use bettershot_platform::x11_screen;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -165,7 +166,7 @@ fn fake_screen_frame(fixture: PathBuf) -> PathBuf {
 }
 
 /// Reads every display through the portal. Tests substitute a fixture image.
-pub(crate) async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
+async fn capture_screen(app: &App) -> Result<PathBuf, CaptureError> {
     let directory = private_dir(app);
     if uses_fake_screen() {
         if let Some(fixture) = std::env::var_os("BETTERSHOT_FAKE_SCREEN") {
@@ -186,18 +187,29 @@ fn report_capture_error(app: &App, error: CaptureError) {
 }
 
 /// Loads a full-desktop screenshot as a frame in the layout's coordinates.
-pub(crate) fn frozen_frame(path: &Path, layout: &Layout) -> Result<FrozenFrame, String> {
+fn frozen_frame(path: &Path, layout: &Layout) -> Result<FrozenFrame, String> {
     let image = imaging::load_rgba(path).map_err(|e| e.to_string())?;
     Ok(FrozenFrame { points_rect: layout.bounds, image })
 }
 
-/// A still frame of every display. Reads the shared-screen stream when the
-/// user allows it (silent; GNOME's screenshot portal flashes the screen),
-/// and otherwise, or when the stream fails, the Screenshot portal. Tests
-/// substitute the fixture image.
+/// A still frame of every display. On an X11 session it reads the X screen
+/// directly (silent, no dialog). On Wayland it reads the shared-screen
+/// stream when the user allows it (silent; GNOME's screenshot portal
+/// flashes the screen), and otherwise, or when either fails, the
+/// Screenshot portal. Tests substitute the fixture image.
 pub(crate) async fn frozen_screen(app: &App) -> Result<FrozenFrame, CaptureError> {
     let layout = layout().ok_or_else(|| CaptureError::Failed("No display is connected.".into()))?;
-    if uses_fake_screen() || !app.with_prefs(|p| p.capture_through_screen_share()) {
+    if uses_fake_screen() {
+        return portal_frozen_screen(app, &layout).await;
+    }
+    if x11_screen::available() {
+        match gio::spawn_blocking(x11_screen::grab).await {
+            Ok(Ok(image)) => return Ok(FrozenFrame { points_rect: layout.bounds, image }),
+            Ok(Err(error)) => eprintln!("bettershot: the X screen could not be read ({error}); using the portal"),
+            Err(_) => eprintln!("bettershot: the X screen reader stopped; using the portal"),
+        }
+    }
+    if !app.with_prefs(|p| p.capture_through_screen_share()) {
         return portal_frozen_screen(app, &layout).await;
     }
     match stream_frozen_screen(app, &layout).await {

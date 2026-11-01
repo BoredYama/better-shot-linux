@@ -15,6 +15,7 @@ pub mod secrets;
 pub mod transcription;
 pub mod tray;
 pub mod video;
+pub mod x11_screen;
 
 pub use ashpd::WindowIdentifier;
 pub use media::element_exists as gst_element_exists;

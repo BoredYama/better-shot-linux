@@ -32,7 +32,7 @@ pub fn available() -> bool {
 
 /// A fresh connection; an X server resets connections that come in bursts,
 /// so a refused one is retried briefly.
-fn connect() -> Option<(x11rb::rust_connection::RustConnection, usize)> {
+pub(crate) fn connect() -> Option<(x11rb::rust_connection::RustConnection, usize)> {
     for attempt in 0..6 {
         if let Ok(connection) = x11rb::connect(None) {
             return Some(connection);

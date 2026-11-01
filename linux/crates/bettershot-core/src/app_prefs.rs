@@ -47,6 +47,9 @@ pub mod keys {
     pub const RECORDING_FRAME_RATE: &str = "bs_recordingFrameRate";
     /// Linux only: the source mode the recording bar last used.
     pub const RECORDING_SOURCE_MODE: &str = "bs_recordingSourceMode";
+    /// Linux only: the ScreenCast token that reopens the display chosen for
+    /// recording without the picker. Window recordings never use it.
+    pub const RECORDING_RESTORE_TOKEN: &str = "bs_recordingRestoreToken";
     /// The teleprompter (`BetterShotPreferences.recordingTeleprompter*`):
     /// whether it shows while recording, its script, and the lines shown.
     pub const TELEPROMPTER_ENABLED: &str = "recordingTeleprompterEnabled";
@@ -310,6 +313,10 @@ impl AppPreferences<'_> {
 
     pub fn recording_source_mode(&self) -> SourceMode {
         self.prefs.string(keys::RECORDING_SOURCE_MODE).and_then(SourceMode::from_raw_value).unwrap_or_default()
+    }
+
+    pub fn recording_restore_token(&self) -> Option<String> {
+        self.prefs.decode::<String>(keys::RECORDING_RESTORE_TOKEN).filter(|token| !token.is_empty())
     }
 }
 

@@ -30,6 +30,11 @@ thread_local! {
     static DECK: RefCell<Option<Deck>> = const { RefCell::new(None) };
 }
 
+/// The recording deck window, once a card has been shown.
+pub fn window() -> Option<gtk::Window> {
+    DECK.with(|deck| deck.borrow().as_ref().map(|d| d.window.clone()))
+}
+
 #[derive(Clone)]
 pub struct Card(Rc<Inner>);
 
@@ -332,7 +337,11 @@ impl Card {
                     card.set_status(&format!("Saved to {folder}"), false);
                     let app = App::get();
                     if app.with_prefs(|p| p.copy_after_save()) {
-                        let _ = clipboard::copy_file_reference(&path);
+                        // Wayland accepts the write only from the focused window.
+                        let path = path.clone();
+                        clipboard::when_focused(window().as_ref(), move || {
+                            let _ = clipboard::copy_file_reference(&path);
+                        });
                     }
                     card.schedule_hide(&app);
                 }

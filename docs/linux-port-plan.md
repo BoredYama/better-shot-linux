@@ -45,7 +45,7 @@ not feel native, and Wayland capture still needs native code).
 | macOS component | Linux replacement |
 | --- | --- |
 | AppKit / SwiftUI | GTK 4 + libadwaita (`gtk4-rs`, `libadwaita-rs`) |
-| ScreenCaptureKit (screenshots) | ScreenCast stream for silent still frames (GNOME's Screenshot portal flashes); Screenshot portal otherwise |
+| ScreenCaptureKit (screenshots) | X11: root `GetImage`; Wayland: ScreenCast stream for silent still frames (GNOME's Screenshot portal flashes); Screenshot portal otherwise |
 | ScreenCaptureKit (recording) | ScreenCast portal → PipeWire → GStreamer `pipewiresrc` |
 | AVFoundation export / VideoToolbox | GStreamer (`x264enc`, `vah264enc`/`vaapih264enc`, `mp4mux`, `qtmux`) |
 | Core Graphics / Core Image drawing | cairo + Pango (`bettershot-render`), one shared rendering path used by preview **and** export |

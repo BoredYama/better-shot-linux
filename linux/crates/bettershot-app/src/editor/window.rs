@@ -880,7 +880,13 @@ fn share_image(editor: &Rc<Editor>) {
                                     eprintln!("bettershot: the share link could not be saved to the library: {error}");
                                 }
                             }
-                            let _ = clipboard::copy_text(&uploaded.link);
+                            // Wayland accepts the write only from the focused window.
+                            let link = uploaded.link.clone();
+                            let window =
+                                editor.widgets.borrow().as_ref().map(|w| w.window.clone().upcast::<gtk::Window>());
+                            clipboard::when_focused(window.as_ref(), move || {
+                                let _ = clipboard::copy_text(&link);
+                            });
                             set_transfer(&editor, Some(TransferStatus::LinkReady { url: uploaded.link }));
                             crate::gallery::reload();
                         }

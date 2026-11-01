@@ -469,7 +469,11 @@ impl Card {
                                         );
                                     }
                                 }
-                                let _ = clipboard::copy_text(&uploaded.link);
+                                // Wayland accepts the write only from the focused window.
+                                let link = uploaded.link.clone();
+                                clipboard::when_focused(window().as_ref(), move || {
+                                    let _ = clipboard::copy_text(&link);
+                                });
                                 card.set_share_status(Some(TransferStatus::LinkReady { url: uploaded.link }));
                                 crate::gallery::reload();
                             }

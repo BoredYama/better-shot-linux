@@ -428,14 +428,15 @@ Both end with a small Copied window showing what was copied; on Wayland that
 window is also what lets BetterShot write the clipboard, so if your desktop
 leaves it unfocused, click its Copy button.
 
-**Still frames** behind region, scrolling, text, and color captures come from
-a screen-sharing stream (the ScreenCast portal) when Settings › Capture ›
-Read the screen through screen sharing is on, which it is by default on
-GNOME, whose screenshot portal flashes the screen for every shot. The first
-time, your desktop asks which screens to share; choose all of them and it
-remembers the choice, and later captures are silent apart from the sharing
-indicator in the top bar for a moment. Turn the setting off to use the
-screenshot portal instead.
+**Still frames** behind region, scrolling, text, and color captures are read
+directly from the X server on an X11 session (silent, no dialog). On
+Wayland they come from a screen-sharing stream (the ScreenCast portal) when
+Settings › Capture › Read the screen through screen sharing is on, which it
+is by default on GNOME, whose screenshot portal flashes the screen for every
+shot. The first time, your desktop asks which screens to share; choose all
+of them and it remembers the choice, and later captures are silent apart
+from the sharing indicator in the top bar for a moment. Turn the setting
+off to use the screenshot portal instead.
 
 **Scrolling Capture** selects an area from a still frame, then opens a small
 session window. Scroll the content, choose **Add Frame** (or press Enter), and
@@ -449,8 +450,10 @@ again.
 Record Screen…, or `bettershot record`). Its picker row offers the screenshot
 modes, then Display, Window, and Area, then Camera, Mic, and Audio toggles, a
 Script button, and a Timer. Display and Window open your desktop's
-screen-sharing dialog to pick the source (later recordings reuse your choice);
-Area selects an area from a still frame and records that part of its display.
+screen-sharing dialog to pick the source; the display you chose is kept
+across launches, so later display and area recordings skip the dialog,
+while a window is chosen each time. Area selects an area from a still frame
+and records that part of its display.
 While recording, the bar becomes a row with Stop and the elapsed time,
 Pause/Resume, Start Over, and Discard; the last two ask first. Stop puts a
 card with the recording's first frame and length on screen: Save writes an

@@ -51,7 +51,6 @@ struct Manager {
     stopping: bool,
     confirming: bool,
     error_message: Option<String>,
-    restore_token: Option<String>,
     on_terminated: Option<Box<dyn FnOnce()>>,
     /// Bumped whenever a start is abandoned, so a stale start task stands down.
     generation: u64,
@@ -179,7 +178,11 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
         system_audio,
         microphone,
         camera,
-        restore_token: with(|m| m.restore_token.clone()),
+        // A remembered display skips the picker; a window is chosen each time.
+        restore_token: match mode {
+            SourceMode::Window => None,
+            SourceMode::Fullscreen | SourceMode::Area => app.with_prefs(|p| p.recording_restore_token()),
+        },
     };
     let (recorder, warnings) = Recorder::start(None, request).await?;
     if !is_starting(generation) {
@@ -226,11 +229,9 @@ fn display_under_pointer() -> Option<Rect> {
 }
 
 async fn select_area(app: &App) -> Result<Option<Rect>, String> {
-    let full = capture::capture_screen(app).await.map_err(|e| e.to_string())?;
+    let frame = capture::frozen_screen(app).await.map_err(|e| e.to_string())?;
     let layout = capture::layout().ok_or_else(|| "No display is connected.".to_string())?;
-    let frame = capture::frozen_frame(&full, &layout);
-    let _ = std::fs::remove_file(&full);
-    let frame = Rc::new(frame?);
+    let frame = Rc::new(frame);
     let preselect = app.with_prefs(|p| p.preselect_previous_region().then(|| p.last_region_rect()).flatten());
     let Some(rect) = selector::select(frame, &layout, preselect, false, selector::RECORD_HINT).await else {
         return Ok(None);
@@ -439,7 +440,9 @@ async fn finalize(app: &App, finished: Option<Finished>) {
     let mut messages: Vec<String> = error_message.into_iter().collect();
     let usable = finished.as_ref().is_some_and(|f| f.file_is_usable);
     if let Some(finished) = &finished {
-        with(|m| m.restore_token = finished.restore_token.clone().or(m.restore_token.take()));
+        if let (Some(token), SourceMode::Fullscreen | SourceMode::Area) = (&finished.restore_token, mode) {
+            app.set_pref(keys::RECORDING_RESTORE_TOKEN, token.as_str());
+        }
         if let Some(error) = &finished.error {
             messages.push(format!("Recording ended early ({error}). Everything captured so far was saved."));
         }

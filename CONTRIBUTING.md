@@ -113,6 +113,28 @@ directory. Follow the website rules in [AGENTS.md](AGENTS.md), including use of
 existing Tailwind tokens, `cn`, and installed Radix components. Website-only
 changes do not need README or changelog edits unless explicitly requested.
 
+### Linux port
+
+[linux/](linux/) is a Rust and GTK 4 port of the app to Linux, in progress. It
+does not build with Xcode and needs no macOS tools. Run `make -C linux check`
+before submitting changes there, `make -C linux check-ui` for UI changes, and
+`make -C linux check-gnome-helper` for changes to the GNOME Shell helper in
+`linux/gnome-extension/` (it needs `gnome-shell` installed);
+see the repository [README](README.md), which documents the Linux port, and the
+[port plan](docs/linux-port-plan.md). The macOS app's README is
+[README.macos.md](README.macos.md).
+Linux changes are recorded in [linux/CHANGELOG.md](linux/CHANGELOG.md), not the
+macOS changelog, and that file is what the Linux app's What's New shows. When you change behavior that a
+`bettershot-core` module ports, such as file naming or share links, update the
+module named in its header comment too.
+
+Linux packages come from `linux/Makefile`: `make -C linux deb` builds a Debian
+package with `cargo-deb`, `make -C linux appimage` assembles an AppDir and, with
+`appimagetool` available, an AppImage, and `make -C linux flatpak` builds the
+Flatpak from `linux/packaging/flatpak/` (regenerate its `cargo-sources.json`
+with flatpak-builder-tools whenever `linux/Cargo.lock` changes). The Linux
+rules for agents are in [AGENTS.md](AGENTS.md#linux-port).
+
 ## Code map
 
 | Location | Start here for |

@@ -1,0 +1,181 @@
+/* BetterShot uses libadwaita's own colors so light, dark, and high-contrast
+   appearances all follow the system. */
+
+.selector-hint {
+  background-color: alpha(black, 0.72);
+  color: white;
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+
+.countdown {
+  font-size: 96px;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  min-width: 180px;
+  min-height: 180px;
+  border-radius: 36px;
+}
+
+.capture-card {
+  border-radius: 12px;
+}
+
+.capture-card picture {
+  border-radius: 12px;
+}
+
+.capture-card .card-action {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  margin: 6px;
+}
+
+.capture-card .card-status {
+  font-size: smaller;
+  font-feature-settings: "tnum";
+}
+
+.capture-card .card-status.error {
+  color: @error_color;
+}
+
+/* The shared capture bar: a 64 px picker row and a 38 px recording row. */
+window.capture-bar {
+  border-radius: 14px;
+}
+
+.capture-bar .picker-row .bar-item {
+  min-height: 64px;
+  min-width: 52px;
+  padding: 0 6px;
+  border-radius: 0;
+}
+
+.capture-bar .bar-caption {
+  font-size: 10px;
+}
+
+.capture-bar .record-item image {
+  color: @error_color;
+}
+
+.capture-bar .recording-row button {
+  min-height: 38px;
+  border-radius: 0;
+  padding: 0 10px;
+}
+
+.capture-bar .record-tint {
+  color: @error_color;
+}
+
+.capture-bar .timer {
+  font-feature-settings: "tnum";
+  font-weight: 500;
+}
+
+.capture-card .duration-badge {
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: smaller;
+  font-feature-settings: "tnum";
+}
+
+/* The video studio: the preview sits on a dark stage. */
+.video-studio .studio-preview {
+  background-color: alpha(black, 0.16);
+}
+
+.video-studio .background-tile.selected {
+  outline: 2px solid @accent_bg_color;
+  outline-offset: 1px;
+}
+
+.image-editor .toolbar {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.editor-inspector .swatch,
+.editor-inspector .background-tile {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px;
+}
+
+.editor-inspector .alignment-cell {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  -gtk-icon-size: 8px;
+}
+
+.editor-inspector .alignment-cell:checked {
+  color: @accent_color;
+}
+
+window.pinned-screenshot {
+  background: none;
+}
+
+.pinned-image {
+  border-radius: 8px;
+}
+
+.transfer-card.compact {
+  padding: 8px;
+  border-radius: 10px;
+  background-color: alpha(currentColor, 0.06);
+}
+
+.transfer-card.osd {
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.copied-hud {
+  padding: 12px 16px;
+  border-radius: 12px;
+}
+
+.transfer-card button.small {
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: smaller;
+}
+
+.transfer-card .transfer-link {
+  padding: 0;
+}
+
+.success {
+  color: @success_color;
+}
+
+.onboarding-dot {
+  color: alpha(currentColor, 0.25);
+}
+
+.onboarding-dot.current {
+  color: @accent_color;
+}
+
+/* The teleprompter: a dark prompter hanging near the top of the screen. */
+.teleprompter-overlay {
+  background-color: alpha(black, 0.92);
+  border-radius: 0 0 16px 16px;
+  color: white;
+}
+.teleprompter-overlay .teleprompter-line {
+  color: alpha(white, 0.6);
+  font-size: 13pt;
+  font-weight: 500;
+}
+.teleprompter-overlay .teleprompter-active {
+  color: white;
+}
+.teleprompter-overlay button {
+  color: alpha(white, 0.8);
+}

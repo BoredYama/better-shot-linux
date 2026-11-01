@@ -1,0 +1,29 @@
+[package]
+name = "bettershot-core"
+version = "0.5.9"
+description = "Platform-independent BetterShot models, file formats, and logic"
+edition.workspace = true
+# Scrolling capture adapts MacShot (GPLv3) and zoom planning adapts Cap (AGPLv3);
+# see Resources/Licenses/MacShot.txt and Resources/Licenses/Cap.txt.
+license = "BSD-3-Clause AND GPL-3.0-only AND AGPL-3.0-only"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+hex.workspace = true
+hmac.workspace = true
+image.workspace = true
+rand.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

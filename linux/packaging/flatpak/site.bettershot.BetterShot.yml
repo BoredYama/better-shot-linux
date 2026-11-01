@@ -1,0 +1,65 @@
+# Flatpak manifest for BetterShot for Linux. Build and install for the
+# current user from linux/ with:
+#
+#   flatpak install flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
+#     org.freedesktop.Sdk.Extension.rust-stable//24.08
+#   python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+#   make flatpak
+#
+# `flatpak-cargo-generator.py` comes from flatpak-builder-tools
+# (https://github.com/flatpak/flatpak-builder-tools/tree/master/cargo) and
+# turns Cargo.lock into offline sources for the sandboxed build; regenerate
+# cargo-sources.json whenever Cargo.lock changes. The build is not run in
+# this repository's CI.
+app-id: site.bettershot.BetterShot
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: bettershot
+finish-args:
+  # Windows on Wayland and X11, and the pointer sampler's X11 connection.
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # System audio monitors, the microphone, and the playback preview.
+  - --socket=pulseaudio
+  # Cameras through V4L2 (the Camera portal is not used yet).
+  - --device=all
+  # Cloud sharing with R2.
+  - --share=network
+  # Where screenshots and recordings are saved; the portals handle capture.
+  - --filesystem=xdg-pictures
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-download
+  # The tray icon and the single-instance name.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=site.bettershot.BetterShot
+  # Tesseract and zbar are not in the runtime and a host install is out of
+  # reach from the sandbox, so Capture Text is unavailable in this build
+  # until they are bundled as modules.
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/bettershot/cargo
+# H.264 comes from the runtime's OpenH264 extension (GStreamer's openh264
+# plugin in the GNOME runtime links it), which the recorder and the studio
+# exporter pick when x264 is absent.
+add-extensions:
+  org.freedesktop.Platform.openh264:
+    directory: lib/openh264
+    version: '2.5.1'
+    add-ld-path: .
+modules:
+  - name: bettershot
+    buildsystem: simple
+    build-commands:
+      - cargo --offline fetch --manifest-path linux/Cargo.toml --verbose
+      - cargo --offline build --release --manifest-path linux/Cargo.toml
+      - make -C linux install DESTDIR=/ PREFIX=/app
+    sources:
+      - type: dir
+        path: ../..
+      - cargo-sources.json

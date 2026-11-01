@@ -1,0 +1,35 @@
+[package]
+name = "bettershot-platform"
+version = "0.5.9"
+description = "Linux desktop integration for BetterShot: portals, tray, and capture backends"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ashpd.workspace = true
+async-channel.workspace = true
+bettershot-core.workspace = true
+bettershot-render.workspace = true
+cairo-rs.workspace = true
+futures-util.workspace = true
+gst.workspace = true
+gst-app.workspace = true
+gst-pbutils.workspace = true
+gtk.workspace = true
+image.workspace = true
+ksni.workspace = true
+oo7.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+ureq.workspace = true
+url.workspace = true
+uuid.workspace = true
+x11rb.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

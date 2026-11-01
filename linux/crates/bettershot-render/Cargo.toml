@@ -1,0 +1,21 @@
+[package]
+name = "bettershot-render"
+version = "0.5.9"
+description = "BetterShot's shared annotation and background renderer, used by the editor preview and every export"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bettershot-core.workspace = true
+cairo-rs.workspace = true
+image.workspace = true
+pango.workspace = true
+pangocairo.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

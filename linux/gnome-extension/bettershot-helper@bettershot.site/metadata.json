@@ -1,0 +1,8 @@
+{
+  "uuid": "bettershot-helper@bettershot.site",
+  "name": "BetterShot Helper",
+  "description": "Lets the installed BetterShot app take screenshots without the screen flash or permission dialogs, pick windows on a still frame, and follow the pointer while recording. Only the BetterShot program installed in /usr/bin or /usr/local/bin can use it.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/BoredYama/better-shot-linux",
+  "version": 1
+}

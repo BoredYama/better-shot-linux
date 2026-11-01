@@ -1,0 +1,65 @@
+[package]
+name = "bettershot-app"
+version = "0.5.9"
+description = "BetterShot for Linux"
+edition.workspace = true
+# Scrolling capture adapts MacShot (GPLv3) and zoom planning adapts Cap (AGPLv3);
+# see Resources/Licenses/MacShot.txt and Resources/Licenses/Cap.txt.
+license = "BSD-3-Clause AND GPL-3.0-only AND AGPL-3.0-only"
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bettershot"
+path = "src/main.rs"
+
+[dependencies]
+adw.workspace = true
+async-channel.workspace = true
+bettershot-core.workspace = true
+bettershot-platform.workspace = true
+bettershot-render.workspace = true
+chrono.workspace = true
+gtk.workspace = true
+image.workspace = true
+pangocairo.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+# `cargo deb -p bettershot-app` (from linux/) builds the Debian package; the
+# asset list mirrors `make install`.
+[package.metadata.deb]
+name = "bettershot"
+maintainer = "BetterShot contributors <noreply@bettershot.site>"
+copyright = "2026 Kartik Labhshetwar and contributors"
+license-file = ["../../../LICENSE", "0"]
+extended-description = "Screenshots with a frosted capture deck and an editor, scrolling capture, text and color capture, screen recording with a video studio, and cloud sharing with your own Cloudflare R2 bucket. A port of the macOS app to GTK 4."
+section = "graphics"
+priority = "optional"
+depends = "$auto, libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5), gstreamer1.0-plugins-good, gstreamer1.0-plugins-base, xdg-desktop-portal"
+recommends = "gstreamer1.0-pipewire, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pulseaudio, tesseract-ocr, tesseract-ocr-eng"
+suggests = "zbar-tools"
+assets = [
+    ["target/release/bettershot", "usr/bin/", "755"],
+    ["../../gnome-extension/bettershot-helper@bettershot.site/metadata.json", "usr/share/gnome-shell/extensions/bettershot-helper@bettershot.site/", "644"],
+    ["../../gnome-extension/bettershot-helper@bettershot.site/extension.js", "usr/share/gnome-shell/extensions/bettershot-helper@bettershot.site/", "644"],
+    ["../../data/site.bettershot.BetterShot.desktop", "usr/share/applications/", "644"],
+    ["../../data/site.bettershot.BetterShot.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../../data/icons/hicolor/16x16/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/16x16/apps/", "644"],
+    ["../../data/icons/hicolor/32x32/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/32x32/apps/", "644"],
+    ["../../data/icons/hicolor/64x64/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/64x64/apps/", "644"],
+    ["../../data/icons/hicolor/128x128/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["../../data/icons/hicolor/256x256/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["../../data/icons/hicolor/512x512/apps/site.bettershot.BetterShot.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["../../data/icons/hicolor/scalable/actions/*.svg", "usr/share/icons/hicolor/scalable/actions/", "644"],
+    ["../../../Resources/Onboarding/coast.png", "usr/share/bettershot/onboarding/", "644"],
+    ["../../../Resources/Licenses/MacShot.txt", "usr/share/doc/bettershot/", "644"],
+    ["../../../Resources/Licenses/Cap.txt", "usr/share/doc/bettershot/", "644"],
+    ["../../../README.md", "usr/share/doc/bettershot/README.md", "644"],
+]

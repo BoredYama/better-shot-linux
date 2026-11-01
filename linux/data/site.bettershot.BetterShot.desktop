@@ -1,0 +1,53 @@
+[Desktop Entry]
+Type=Application
+Name=BetterShot
+GenericName=Screenshot Tool
+Comment=Capture, edit, and share your screen
+Exec=bettershot %u
+Icon=site.bettershot.BetterShot
+Terminal=false
+StartupNotify=true
+Categories=Graphics;2DGraphics;RasterGraphics;
+Keywords=screenshot;capture;screen;snip;record;recording;video;
+MimeType=x-scheme-handler/bettershot;image/png;image/jpeg;
+Actions=capture-region;capture-screen;capture-window;capture-previous-region;capture-scroll;capture-text;pick-color;record;gallery;settings;
+
+[Desktop Action capture-region]
+Name=Capture Region
+Exec=bettershot capture region
+
+[Desktop Action capture-screen]
+Name=Capture Screen
+Exec=bettershot capture fullscreen
+
+[Desktop Action capture-window]
+Name=Capture Window
+Exec=bettershot capture window
+
+[Desktop Action capture-previous-region]
+Name=Capture Previous Region
+Exec=bettershot capture previous-region
+
+[Desktop Action capture-scroll]
+Name=Scrolling Capture
+Exec=bettershot capture scroll
+
+[Desktop Action capture-text]
+Name=Capture Text
+Exec=bettershot capture text
+
+[Desktop Action pick-color]
+Name=Pick Color
+Exec=bettershot capture color
+
+[Desktop Action record]
+Name=Record Screen
+Exec=bettershot record
+
+[Desktop Action gallery]
+Name=Media Gallery
+Exec=bettershot gallery
+
+[Desktop Action settings]
+Name=Settings
+Exec=bettershot settings

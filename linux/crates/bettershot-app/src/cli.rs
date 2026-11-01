@@ -111,9 +111,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [uri] if uri.starts_with("file://") => {
             file_uri_path(uri).map(Command::Edit).ok_or_else(|| format!("Unsupported file address: {uri}"))
         }
-        [path] if !path.contains("://") && std::path::Path::new(path).is_file() => {
-            Ok(Command::Edit((*path).to_owned()))
-        }
+        [path] if !path.contains("://") && std::path::Path::new(path).exists() => Ok(Command::Edit((*path).to_owned())),
         [url] if url.contains("://") => match CaptureUrlAction::from_url(url) {
             Some(action) => from_url_action(action),
             None => Err(format!("Unsupported BetterShot URL: {url}")),

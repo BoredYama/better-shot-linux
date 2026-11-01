@@ -500,6 +500,60 @@ PY
       xdotool windowactivate --sync "$gallery" 2>/dev/null || true; sleep 0.5
       shot "$SCENARIO-$APPEARANCE-8-gallery"
       ;;
+    studio)
+      # Record the fixture, open the package in the studio, cut it, frame it,
+      # and save: the project, its flattened render, and the saved MP4 follow.
+      "$BIN" record display; sleep 4
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" ]] || fail "no recording package"
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-2-studio"
+      eval "$(xdotool getwindowgeometry --shell "$studio")"
+      local sx=$X sy=$Y sw=$WIDTH sh=$HEIGHT
+      # Scissors, then a cut in the middle of the timeline.
+      xdotool key s; sleep 0.3
+      click_at $((sx + sw - 300)) $((sy + sh - 50))
+      xdotool key s; sleep 0.3
+      shot "$SCENARIO-$APPEARANCE-3-cut"
+      # The Blush gradient tile.
+      click_at $((sx + 95)) $((sy + 112))
+      # Delete the selected (trailing) clip, then undo that.
+      xdotool key Delete; sleep 0.5
+      xdotool key ctrl+z; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-4-framed"
+      xdotool key space; sleep 1.2; xdotool key space; sleep 0.5
+      xdotool key ctrl+s; sleep 14
+      shot "$SCENARIO-$APPEARANCE-5-saved"
+      [[ -f "$package/edit.json" && -f "$package/render.json" ]] || fail "Save did not write the project"
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the cut or the gradient"
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(len(d["clips"]), list(d["style"]["background"].keys()), file=sys.stderr)
+sys.exit(0 if len(d["clips"]) == 2 and "gradient" in d["style"]["background"] and d["formatVersion"] == 8 else 1)
+PY
+      local rendered; rendered="$(find "$package" -maxdepth 1 -name '*.mp4' | head -1)"
+      [[ -n "$rendered" ]] || fail "Save did not render the deliverable into the package"
+      [[ $(saved_files | wc -l) -eq 1 && "$(saved_files)" == *.mp4 ]] || fail "Save wrote $(saved_files | wc -l) files"
+      local probe; probe="$(gst-discoverer-1.0 "$(saved_files)" 2>/dev/null || true)"
+      [[ "$probe" == *"Width: 1280"* && "$probe" == *"Height: 800"* ]] || fail "the saved video is not 1280x800: $probe"
+      # A second Save with the padding changed replaces the saved file.
+      xdotool mousemove $((sx + 120)) $((sy + 349)); sleep 0.3; xdotool mousedown 1; sleep 0.1; xdotool mouseup 1; sleep 0.8
+      xdotool key ctrl+s; sleep 14
+      [[ $(saved_files | wc -l) -eq 1 ]] || fail "a second Save added a file instead of replacing the export"
+      # Closing with no unsaved edits closes at once.
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
+      # Reopening loads the saved cut and background.
+      "$BIN" edit "$package"; sleep 4
+      studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not reopen"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-6-reopened"
+      ;;
     hide)
       "$BIN" capture region; sleep 1.5
       select_area; xdotool key Return; sleep 1
@@ -636,6 +690,9 @@ done
 for appearance in light dark; do
   scenario color "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
   scenario redact "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2}"
+done
+for appearance in light dark; do
+  scenario studio "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": false}"
 done
 for appearance in light dark; do
   scenario record "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": true}"

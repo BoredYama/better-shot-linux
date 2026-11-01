@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>site.bettershot.BetterShot</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>BSD-3-Clause AND GPL-3.0-only</project_license>
+  <project_license>BSD-3-Clause AND GPL-3.0-only AND AGPL-3.0-only</project_license>
   <name>BetterShot</name>
   <summary>Capture, edit, and share your screen</summary>
   <description>
@@ -24,8 +24,8 @@
     </p>
     <p>
       Record a display, a window, or an area, with system audio, a microphone,
-      and a camera, then save the recording as MP4 or keep it in the Media
-      Gallery.
+      and a camera, then cut, frame, zoom, mask, and export the recording in
+      the studio, or keep it in the Media Gallery.
     </p>
   </description>
   <launchable type="desktop-id">site.bettershot.BetterShot.desktop</launchable>

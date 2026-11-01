@@ -11,6 +11,7 @@ pub mod recorder;
 pub mod screenshot;
 pub mod secrets;
 pub mod tray;
+pub mod video;
 
 pub use ashpd::WindowIdentifier;
 pub use media::element_exists as gst_element_exists;

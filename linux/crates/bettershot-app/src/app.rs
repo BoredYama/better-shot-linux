@@ -240,7 +240,9 @@ fn run(_application: &adw::Application, command: Command, cwd: Option<std::path:
             // A relative path is relative to the invoking process's folder.
             let path = std::path::PathBuf::from(path);
             let path = if path.is_absolute() { path } else { cwd.map(|dir| dir.join(&path)).unwrap_or(path) };
-            crate::editor::open(&app, &path);
+            if !crate::studio::open_path(&app, &path) {
+                crate::editor::open(&app, &path);
+            }
         }
         Command::OpenImage => crate::editor::open_file_dialog(&app),
         Command::Gallery => crate::gallery::present(&app),

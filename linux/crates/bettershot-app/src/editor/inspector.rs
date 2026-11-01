@@ -16,12 +16,12 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 /// A labelled slider sharing one adjustment with an editable value field.
-struct Slider {
-    root: gtk::Box,
-    adjustment: gtk::Adjustment,
+pub(crate) struct Slider {
+    pub(crate) root: gtk::Box,
+    pub(crate) adjustment: gtk::Adjustment,
 }
 
-fn slider(label: &str, min: f64, max: f64, step: f64, digits: u32) -> Slider {
+pub(crate) fn slider(label: &str, min: f64, max: f64, step: f64, digits: u32) -> Slider {
     let adjustment = gtk::Adjustment::new(min, min, max, step, step * 10.0, 0.0);
     let title = gtk::Label::builder().label(label).xalign(0.0).hexpand(true).css_classes(["caption-heading"]).build();
     let value = gtk::SpinButton::new(Some(&adjustment), step, digits);
@@ -40,7 +40,7 @@ fn slider(label: &str, min: f64, max: f64, step: f64, digits: u32) -> Slider {
     Slider { root, adjustment }
 }
 
-fn dropdown(label: &str, items: &[&str]) -> (gtk::Box, gtk::DropDown) {
+pub(crate) fn dropdown(label: &str, items: &[&str]) -> (gtk::Box, gtk::DropDown) {
     let title = gtk::Label::builder().label(label).xalign(0.0).hexpand(true).css_classes(["caption-heading"]).build();
     let list = gtk::DropDown::from_strings(items);
     list.update_property(&[gtk::accessible::Property::Label(label)]);
@@ -50,12 +50,12 @@ fn dropdown(label: &str, items: &[&str]) -> (gtk::Box, gtk::DropDown) {
     (row, list)
 }
 
-fn heading(text: &str) -> gtk::Label {
+pub(crate) fn heading(text: &str) -> gtk::Label {
     gtk::Label::builder().label(text).xalign(0.0).css_classes(["heading"]).margin_top(8).build()
 }
 
 /// A round color button labelled for screen readers.
-fn color_button(title: &str, rgba: (f64, f64, f64, f64)) -> gtk::Button {
+pub(crate) fn color_button(title: &str, rgba: (f64, f64, f64, f64)) -> gtk::Button {
     let area = gtk::DrawingArea::new();
     area.set_content_width(22);
     area.set_content_height(22);
@@ -75,7 +75,7 @@ fn color_button(title: &str, rgba: (f64, f64, f64, f64)) -> gtk::Button {
 }
 
 /// A background tile drawn with the same code the canvas and exports use.
-fn background_tile(title: &str, style: BgStyle) -> gtk::Button {
+pub(crate) fn background_tile(title: &str, style: BgStyle) -> gtk::Button {
     let area = gtk::DrawingArea::new();
     area.set_content_width(34);
     area.set_content_height(26);

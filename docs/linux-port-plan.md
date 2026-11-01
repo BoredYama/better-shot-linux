@@ -1,7 +1,7 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0–5 complete (core, CI, screenshot app, image editor, capture
-extras, sharing and library, screen recording). Phase 6 is next.
+Status: Phases 0–6 complete (core, CI, screenshot app, image editor, capture
+extras, sharing and library, screen recording, video editor). Phase 7 is next.
 
 ## What is being ported
 
@@ -325,13 +325,55 @@ while building it:
   Camera portal, cursor metadata, and keystroke overlays (Wayland offers no
   global input).
 
-### Phase 6: Video editor
+### Phase 6: Video editor (done)
 - Timeline with cuts (scissors), speed, trims, zoom segments (port
   `ViewportTimeline` springs), masks (Crop Only / Full Frame), crop, captions.
 - Cursor styles (Recorded/Arrow/Dark/Light/Dot, legacy Hand), camera layouts via
   a port of `RecordingStudioLayout`, backgrounds, effects.
 - Frame compositor shared by preview and export; export MP4/MOV at 30/60 fps,
   Save vs Export semantics.
+
+Delivered as `bettershot-core::recording::{edit, clips, viewport, layout}`,
+`bettershot-render::studio`, `bettershot-platform::video`, and the studio in
+`bettershot-app` (`studio/model.rs`, `studio/window.rs`). Decisions made while
+building it:
+
+- The edit document is format 8 as macOS writes it, including the legacy
+  trim envelope for single-clip projects, omitted defaults, `[x, y]` points,
+  and whole doubles written as integers; fields this build does not edit
+  (subtitles, replacement audio, 3D shots) survive a save untouched. A test
+  rewrites a macOS project byte for byte.
+- The clip timeline, zoom cue synthesis, viewport springs, and canvas layout
+  are line-for-line ports with the macOS checks (`RecordingClipSpeedCheck`,
+  `checkZoomCamera`) as unit tests. The viewport file keeps Cap's AGPLv3
+  header, so `bettershot-core` and the app now declare
+  `BSD-3-Clause AND GPL-3.0-only AND AGPL-3.0-only`, and `make install` ships
+  `Resources/Licenses/Cap.txt`.
+- The compositor is cairo: a cached backdrop (background and card shadow),
+  the zoomed frame clipped to the rounded card, blur and pixelate masks over
+  the source pixels, and the camera bubble with its shadow and border. The
+  preview and the exporter draw through the same `compose`.
+- Frames come from `qtdemux ! decodebin ! videoconvert` into an `appsink`
+  as BGRx (cairo's RGB24 layout, no conversion); the reader seeks when the
+  playhead moves back or far ahead and otherwise pulls forward. Audio tracks
+  are mixed to one 48 kHz stereo track; the exporter cuts and retimes it
+  per clip (nearest-neighbour, pitch changes with speed as macOS's
+  `scaleTimeRange` does) and pushes it interleaved with the video into
+  x264 → mp4mux/qtmux through `appsrc`, with progress and cancellation.
+- Save commits `edit.json`, drops the draft, renders the flattened
+  deliverable into the package (`<base>.mp4`, stamped by `render.json`)
+  unless the recording is untouched, and writes or replaces the saved file;
+  Export As writes a new file the user chose. Motion-blur supersampling is
+  not implemented, so each output frame samples one source frame.
+- The preview is silent: it steps the playhead with a timer and composites
+  frames; audio playback waits for a GStreamer playback path.
+- Crop and mask areas are set with numeric sliders in the inspector rather
+  than handles on the preview, and the camera bubble is placed by the layout
+  presets and its sliders, not by dragging.
+- Not yet: the pointer timeline and cursor styles (Phase 5's gap), click
+  effects, keystroke captions, subtitles and transcription, the reframe
+  presets' UI (documents from macOS keep and apply them), style presets,
+  the Projects browser, and 3D shots (Phase 7).
 
 ### Phase 7: Advanced and distribution
 - 3D shots on `wgpu`, verified against `Cap3DReference.json`/`Cap3DScenes.json`.

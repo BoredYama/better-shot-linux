@@ -68,6 +68,15 @@ pub fn show_existing(app: &App, path: &Path) -> bool {
     true
 }
 
+/// Updates cards for a package the studio just saved.
+pub fn refresh_saved(session: &RecordingSession) {
+    let cards = DECK.with(|deck| deck.borrow().as_ref().map(|d| d.cards.clone()).unwrap_or_default());
+    for card in cards.into_iter().filter(|card| card.0.session.directory == session.directory) {
+        card.0.saved.set(true);
+        card.set_status("Saved from the studio", false);
+    }
+}
+
 /// Removes cards for a package that was deleted elsewhere.
 pub fn forget(directory: &Path) {
     let cards = DECK.with(|deck| deck.borrow().as_ref().map(|d| d.cards.clone()).unwrap_or_default());
@@ -140,7 +149,7 @@ impl Card {
         let name = session.display_name();
         let duration = manifest.as_ref().map(|m| core_recording::formatted_duration(m.duration)).unwrap_or_default();
         picture.set_alternative_text(Some(&format!("Recording {name}, {duration}")));
-        picture.set_tooltip_text(Some(&format!("{name}\n{duration}")));
+        picture.set_tooltip_text(Some(&format!("{name}\n{duration}\nDouble-click to edit")));
 
         // The card keeps the deck's size whatever the recording's shape: the
         // poster fills a fixed frame instead of sizing the card.
@@ -188,9 +197,10 @@ impl Card {
             saving: Cell::new(false),
             saved: Cell::new(false),
         }));
-        let actions: [CardAction; 5] = [
+        let actions: [CardAction; 6] = [
             ("window-close-symbolic", "Dismiss", gtk::Align::Start, gtk::Align::Start, Card::dismiss),
             ("user-trash-symbolic", "Delete recording", gtk::Align::End, gtk::Align::Start, Card::delete),
+            ("document-edit-symbolic", "Edit in the studio", gtk::Align::Start, gtk::Align::Center, Card::edit),
             (
                 "media-playback-start-symbolic",
                 "Open in a video player",
@@ -236,7 +246,7 @@ impl Card {
         click.connect_pressed(move |_, presses, _, _| {
             if presses == 2 {
                 if let Some(inner) = weak.upgrade() {
-                    Card(inner).open();
+                    Card(inner).edit();
                 }
             }
         });
@@ -344,6 +354,12 @@ impl Card {
             Err(error) => self.set_status(&format!("Couldn’t copy. {error}"), true),
         }
         self.schedule_hide(&App::get());
+    }
+
+    /// Opens the studio; the card stays until it hides or is dismissed.
+    pub fn edit(&self) {
+        self.cancel_timer();
+        crate::studio::open(&App::get(), &self.0.session);
     }
 
     /// Opens the video in the default player.

@@ -13,6 +13,7 @@ pub mod blur;
 pub mod freehand;
 pub mod geometry;
 pub mod path;
+pub mod studio;
 pub mod surface;
 pub mod text;
 
@@ -220,7 +221,12 @@ fn device_scale(cr: &cairo::Context) -> f64 {
 // MARK: - Background
 
 fn draw_background(cr: &cairo::Context, settings: &BackgroundSettings, w: f64, h: f64, cache: &mut RenderCache) {
-    match &settings.style {
+    draw_background_style(cr, &settings.style, w, h, cache);
+}
+
+/// Fills `w` by `h` with a background style; shared with the video studio.
+pub fn draw_background_style(cr: &cairo::Context, style: &BgStyle, w: f64, h: f64, cache: &mut RenderCache) {
+    match style {
         BgStyle::None => {}
         BgStyle::Solid(color) => {
             cr.set_source_rgba(color.red, color.green, color.blue, color.alpha);
@@ -322,6 +328,57 @@ fn draw_wallpaper(cr: &cairo::Context, path: &str, w: f64, h: f64, cache: &mut R
             let _ = cr.stroke();
         }
     }
+}
+
+/// A drop shadow's offset, blur, and strength.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoftShadow {
+    pub y_offset: f64,
+    pub sigma: f64,
+    pub alpha: f64,
+}
+
+/// A soft drop shadow outside `rect`, never under it, from explicit
+/// parameters: the video studio's card and camera shadows.
+pub fn draw_soft_shadow(
+    cr: &cairo::Context,
+    rect: (f64, f64, f64, f64),
+    radius: f64,
+    canvas: (f64, f64),
+    shadow: SoftShadow,
+    cache: &mut RenderCache,
+) {
+    let SoftShadow { y_offset, sigma, alpha } = shadow;
+    if alpha <= 0.0 || sigma <= 0.0 {
+        return;
+    }
+    let radii = [radius; 4];
+    let scale = device_scale(cr).min(1.0).min(4096.0 / canvas.0.max(canvas.1));
+    let key = format!("{rect:?}{radius}{sigma}{canvas:?}{scale}");
+    let cached = cache.shadow.as_ref().filter(|(k, ..)| *k == key).map(|(_, s, ..)| s.clone());
+    let mask = match cached {
+        Some(mask) => mask,
+        None => {
+            let Some(mask) = shadow_mask(rect, radii, sigma, canvas, scale) else { return };
+            cache.shadow = Some((key, mask.clone(), 0.0, 0.0));
+            mask
+        }
+    };
+    let _ = cr.save();
+    cr.set_fill_rule(cairo::FillRule::EvenOdd);
+    cr.rectangle(0.0, 0.0, canvas.0, canvas.1);
+    rounded_rect(
+        cr,
+        (rect.0 - 1.0, rect.1 - 1.0, rect.2 + 2.0, rect.3 + 2.0),
+        radii.map(|r| if r > 0.0 { r + 1.0 } else { 0.0 }),
+    );
+    cr.clip();
+    cr.set_fill_rule(cairo::FillRule::Winding);
+    cr.translate(0.0, y_offset);
+    cr.scale(1.0 / scale, 1.0 / scale);
+    cr.set_source_rgba(0.0, 0.0, 0.0, alpha);
+    let _ = cr.mask_surface(&mask, 0.0, 0.0);
+    let _ = cr.restore();
 }
 
 /// A soft drop shadow outside `rect`, never under it.

@@ -5,14 +5,15 @@ Swift sources in `../Sources` remain the reference implementation; the
 [port plan](../docs/linux-port-plan.md) describes the stack, phases, and
 Wayland constraints.
 
-**Status:** Phase 5, screenshots, the image editor, capture extras, sharing,
-the library, and screen recording. Capture an area, the screen, a window, the
-previous area, or a scrolling area; copy, save, drag, pin, share, or edit
-captures from the capture deck; annotate and frame them in the editor, with
-smart redaction of sensitive text; copy text from the screen with OCR; pick
-colors; share links through your own Cloudflare R2 bucket; browse everything
-in the Media Gallery; and record a display, window, or area with audio and a
-camera. The video editor comes in a later phase.
+**Status:** Phase 6, screenshots, the image editor, capture extras, sharing,
+the library, screen recording, and the video studio. Capture an area, the
+screen, a window, the previous area, or a scrolling area; copy, save, drag,
+pin, share, or edit captures from the capture deck; annotate and frame them
+in the editor, with smart redaction of sensitive text; copy text from the
+screen with OCR; pick colors; share links through your own Cloudflare R2
+bucket; browse everything in the Media Gallery; record a display, window, or
+area with audio and a camera; and cut, frame, zoom, mask, and export
+recordings in the studio. 3D shots and packaging come in a later phase.
 
 ## Install from source
 
@@ -63,7 +64,7 @@ Then open BetterShot from your app menu. `make uninstall` removes it.
 | `bettershot record` | Open the capture bar, with the recording sources and input toggles |
 | `bettershot record display` / `window` / `area` | Start recording; `area` selects it first |
 | `bettershot record stop` / `pause` / `restart` / `discard` | Control the running recording (`restart` and `discard` ask first) |
-| `bettershot edit FILE` | Open an image in the editor (also "Open With" for PNG and JPEG) |
+| `bettershot edit FILE` | Open an image in the editor, or a recording project (`.bettershotrec`) in the studio |
 | `bettershot open-image` | Choose an image to edit |
 | `bettershot gallery` | Open the Media Gallery |
 | `bettershot bettershot://capture/region` | Run a BetterShot URL (also `capture/scroll`, `record`, `ocr`, `color-picker`) |
@@ -174,6 +175,28 @@ camera. Recordings are kept as projects in `~/.local/share/bettershot/Recordings
 in the macOS app's package format, listed in the Media Gallery, and written so
 that a crash leaves them playable; the next launch recovers interrupted ones.
 
+**The video studio** opens from a recording card's Edit button (or a
+double-click), the Media Gallery's Edit, `bettershot edit <project>`, or
+automatically after recording with Settings › General › Open the editor. The
+inspector on the left has Background (the gradients and colors, padding,
+corner radius, and shadow; new recordings start from General › Default Look),
+Cursor (recorded into the picture, so not restyled yet), Camera (show, the
+Bubble, Overlap, Side-by-Side, Presenter, Camera Only, and Screen Only
+layouts, side, size, roundness, and frame ratio), Effects (a crop and blur or
+pixelate masks, each with an area, strength, and time range), Zoom & Clips
+(zooms at the playhead with magnification, focus, and how they follow;
+Scissors, Delete Clip, Reset Clips, and the selected clip's speed), and Export
+(MP4 or MOV, 30 or 60 fps, quality, resolution, audio). The preview draws
+exactly what exports do; Space plays it (without sound), Left and Right step
+a frame, and Shift steps a second. On the timeline, click to seek and select
+a clip, click with Scissors (S) to cut, and read the removed time under each
+cut. Ctrl+Z and Ctrl+Shift+Z undo and redo; drafts save as you work, and
+closing with unsaved edits asks. **Save** (Ctrl+S) writes the project,
+renders the edited video into it, and creates or replaces the saved file in
+your folder; **Export As** writes a new file anywhere. Projects are the macOS
+app's `.bettershotrec` packages and `edit.json`, so they open on either
+platform.
+
 ### Keyboard shortcuts
 
 BetterShot asks your desktop for global shortcuts through the GlobalShortcuts
@@ -197,9 +220,13 @@ for example `bettershot capture region`.
 - **The cursor is recorded as pixels.** GStreamer's PipeWire source drops the
   stream's cursor metadata, so recordings have no separate pointer timeline;
   cursor restyling and click effects come with the video editor.
-- **Recordings are saved as recorded.** Until the video editor is ported, Save
-  converts the screen movie to MP4 without re-encoding; the camera movie stays
-  in the project, and macOS projects with edits are saved without them.
+- **The studio preview is silent** and plays by stepping frames; audio is
+  only in the exported file. There is no motion blur during zooms, crop and
+  mask areas are set with sliders rather than handles, the camera bubble is
+  placed by its layout and sliders, and pointer styling, click effects,
+  keystroke captions, subtitles, reframe presets, style presets, and 3D shots
+  from macOS projects are kept but not shown. A card's Save without opening
+  the studio still delivers the recording as recorded.
 - **Area recordings** are cropped from the display your desktop's dialog
   shares. Pick the display that holds the area; if it does not, the whole
   display is recorded.
@@ -240,8 +267,8 @@ for example `bettershot capture region`.
 | Crate | Contents |
 | --- | --- |
 | [`bettershot-core`](crates/bettershot-core) | Models, file formats, and logic with no GUI dependencies |
-| [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas and every export |
-| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, the GStreamer recorder and media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
+| [`bettershot-render`](crates/bettershot-render) | The shared cairo/Pango renderer used by the editor canvas, every image export, and the studio's preview and video export |
+| [`bettershot-platform`](crates/bettershot-platform) | Screenshot, ScreenCast, and GlobalShortcuts portals, the GStreamer recorder, frame and audio readers, the video exporter, media helpers, device lists, `grim` fallback, tray, the R2 HTTP client, and keyring storage |
 | [`bettershot-app`](crates/bettershot-app) | The GTK app and `bettershot` command |
 
 ### What `bettershot-core` covers
@@ -256,6 +283,7 @@ Each module names the Swift file it ports. Keep the two in step.
 | `scroll_capture` | `ScrollFrameAnalyzer.swift` and `ScrollCaptureController`'s registration and merge rules (adapted from MacShot, GPLv3) |
 | `pin` | `PinnedScreenshot.swift`: pin size and scroll-scaling |
 | `recording` | `RecordingSession.swift`, `RecordingProject.swift`, `RecordingDeliverable.swift`, `RecordingRecoveryCoordinator.swift`, and `ScreenRecordingManager`'s state and clock: the package, its sidecars, deliverable naming and saving, recovery |
+| `recording::edit`, `clips`, `viewport`, `layout` | `RecordingStudioStyle.swift` (the format 8 edit document, style, and canvas layout), `RecordingClipTimeline.swift`, `RecordingViewportTimeline.swift` and `RecordingMotionSpring.swift` (zoom cues and springs, adapted from Cap), `RecordingVideoMask.swift`, `RecordingVideoCrop.swift`, `VideoCompressionModels.swift` |
 | `deck` | `DeckStaging.swift`, `ScreenshotFileActions`, and `CaptureOrchestrator`'s staging and after-capture decisions |
 | `history` | `HistoryStore.swift`: the library, `history.json`, and retention |
 | `imaging` | `FrozenScreenFrame.swift`, image encoding, and atomic, collision-free writes |
@@ -276,7 +304,8 @@ manifests) use the same JSON, including Swift's `Codable` shapes for enums and
 dates.
 
 `bettershot-render` ports `AnnoShapeDrawing.swift`, `ShapeRenderer.swift`,
-the arrow solvers, and `AnnotationBackgroundRenderer.swift`. The canvas and
+the arrow solvers, `AnnotationBackgroundRenderer.swift`, and, in `studio`,
+the `StudioFrameCompositor` of `RecordingStudioExporter.swift`. The canvas and
 exports both draw through `draw_canvas`, so the preview is a reduction of the
 export. Freehand ink uses the perfect-freehand algorithm with the macOS stroke
 options; outlines are close to, but not pixel-identical with, the macOS ink.
@@ -303,11 +332,13 @@ options; outlines are close to, but not pixel-identical with, the macOS ink.
 
 BetterShot is under the BSD 3-Clause License ([LICENSE](../LICENSE)).
 Scrolling capture's stitching is adapted from
-[MacShot](https://github.com/sw33tLie/macshot), which is GPLv3, so
-`bettershot-core` and the `bettershot` program are `BSD-3-Clause AND
-GPL-3.0-only`; `make install` ships both notices
-([MacShot.txt](../Resources/Licenses/MacShot.txt)). The renderer and platform
-crates are BSD-3-Clause alone.
+[MacShot](https://github.com/sw33tLie/macshot), which is GPLv3, and the
+studio's zoom planning from [Cap](https://github.com/CapSoftware/Cap), which
+is AGPLv3, so `bettershot-core` and the `bettershot` program are
+`BSD-3-Clause AND GPL-3.0-only AND AGPL-3.0-only`; `make install` ships the
+notices ([MacShot.txt](../Resources/Licenses/MacShot.txt),
+[Cap.txt](../Resources/Licenses/Cap.txt)). The renderer and platform crates
+are BSD-3-Clause alone.
 
 ## Development
 
@@ -330,9 +361,12 @@ must leave the clipboard alone), Pick Color, smart redaction, Capture Region &
 Pin (scaling, the context menu, Ctrl+W), a scrolling capture stitched from
 fixture frames, sharing from a card and from the editor, the Sharing settings,
 the Media Gallery (cloud list, Delete Cloud Share, Move to Trash), first-run
-setup, What's New, and recording (the bar, an area recording with Pause, the
+setup, What's New, recording (the bar, an area recording with Pause, the
 card and automatic MP4 saving, Discard's confirmation, and recovery of an
-interrupted package at launch), in light and dark appearances.
+interrupted package at launch), and the studio (a cut with Scissors, a
+gradient background, Delete and Undo, playback, Save rendering the project
+and replacing the saved file, closing, and reopening the saved cut), in light
+and dark appearances.
 `BETTERSHOT_UI_ONLY=text,scroll` runs only the named scenarios. Each step's screenshot
 lands in `target/ui-snapshots/`. It replaces the portal with a fixture image,
 so it cannot check real portals, Wayland compositors, global shortcuts, the
@@ -347,7 +381,8 @@ folder, and `BETTERSHOT_FAKE_SCREEN` (honored only in testing) substitutes the
 screenshot; a folder of images plays them in name order, one per screenshot.
 Recording plays the same image as a live stream, with silent audio and a test
 pattern for the camera, so `BETTERSHOT_TESTING=1 BETTERSHOT_FAKE_SCREEN=... cargo test -p bettershot-platform`
-also exercises the encoder pipeline, pause, cropping, and MP4 conversion.
+also exercises the encoder pipeline, pause, cropping, MP4 conversion, frame
+seeking, and an edited export with cuts, speed, and a background.
 In testing, R2 keys come from `config/test-r2-keys.json` instead of the
 keyring, `BETTERSHOT_R2_ENDPOINT` points uploads at a local fake, and Move to
 Trash uses a private folder. The crate versions must match `version.json`; a test enforces it.

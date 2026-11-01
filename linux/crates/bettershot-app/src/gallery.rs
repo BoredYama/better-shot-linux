@@ -616,6 +616,9 @@ fn edit_item(gallery: &Rc<Gallery>, item: &GalleryItem) {
         show_message(gallery, "This file was moved or deleted. Refresh the gallery.");
         return;
     }
+    if item.kind == CaptureKind::Recording && crate::studio::open_path(&App::get(), &item.capture) {
+        return;
+    }
     crate::editor::open(&App::get(), &item.capture);
 }
 

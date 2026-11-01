@@ -281,6 +281,8 @@ dependencies = [
  "ashpd",
  "async-channel",
  "bettershot-core",
+ "bettershot-render",
+ "cairo-rs",
  "chrono",
  "futures-util",
  "gstreamer",

@@ -51,9 +51,10 @@ install: release ## Install to $(PREFIX) (default /usr/local)
 		install -Dm644 "$$icon" $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions/$$(basename "$$icon"); \
 	done
 	install -Dm644 ../Resources/Onboarding/coast.png $(DESTDIR)$(PREFIX)/share/bettershot/onboarding/coast.png
-	@# Scrolling capture adapts MacShot (GPLv3); its notice ships with the app.
+	@# Scrolling capture adapts MacShot (GPLv3) and zoom planning adapts Cap (AGPLv3); their notices ship with the app.
 	install -Dm644 ../LICENSE $(DESTDIR)$(PREFIX)/share/licenses/bettershot/LICENSE
 	install -Dm644 ../Resources/Licenses/MacShot.txt $(DESTDIR)$(PREFIX)/share/licenses/bettershot/MacShot.txt
+	install -Dm644 ../Resources/Licenses/Cap.txt $(DESTDIR)$(PREFIX)/share/licenses/bettershot/Cap.txt
 	@# Packagers (DESTDIR set) leave cache updates to the package manager.
 	if [ -z "$(DESTDIR)" ]; then \
 		gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor || true; \

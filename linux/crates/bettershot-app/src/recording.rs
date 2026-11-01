@@ -497,8 +497,11 @@ pub fn import(app: &App, session: &RecordingSession) -> Option<PathBuf> {
 fn present_finished(app: &App, session: &RecordingSession) {
     import(app, session);
     app.play_shutter();
-    let card = recording_card::show(app, session);
     let save = after_capture::is_enabled(AfterCaptureAction::Save, CaptureType::Recording, &app.state().prefs);
+    if app.with_prefs(|p| p.open_editor_after_recording()) {
+        crate::studio::open(app, session);
+    }
+    let card = recording_card::show(app, session);
     if save {
         card.save();
     }

@@ -155,7 +155,33 @@ fn video_encoder(frame_rate: i64) -> Option<String> {
         .map(|(name, props)| format!("{name} {props}"))
 }
 
-fn audio_encoder() -> Option<&'static str> {
+/// The installed H.264 encoder for an offline export at constant quality
+/// `crf` with an x264 `preset` (ignored by the other encoders).
+pub fn video_encoder_named(frame_rate: i64, crf: u32, preset: &str) -> Option<String> {
+    let keyframes = frame_rate.clamp(1, 240) * 2;
+    let preset = if ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
+        .contains(&preset)
+    {
+        preset
+    } else {
+        "fast"
+    };
+    let candidates = [
+        (
+            "x264enc",
+            format!("speed-preset={preset} pass=qual quantizer={} key-int-max={keyframes} threads=0", crf.clamp(1, 51)),
+        ),
+        ("vah264enc", String::new()),
+        ("vaapih264enc", String::new()),
+        ("openh264enc", format!("gop-size={keyframes} rate-control=quality")),
+    ];
+    candidates
+        .into_iter()
+        .find(|(name, _)| gst::ElementFactory::find(name).is_some())
+        .map(|(name, props)| format!("{name} {props}"))
+}
+
+pub fn audio_encoder() -> Option<&'static str> {
     ["fdkaacenc", "voaacenc", "avenc_aac", "opusenc"].into_iter().find(|name| gst::ElementFactory::find(name).is_some())
 }
 

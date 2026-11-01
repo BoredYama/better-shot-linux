@@ -83,6 +83,16 @@ window.capture-bar {
   font-feature-settings: "tnum";
 }
 
+/* The video studio: the preview sits on a dark stage. */
+.video-studio .studio-preview {
+  background-color: alpha(black, 0.16);
+}
+
+.video-studio .background-tile.selected {
+  outline: 2px solid @accent_bg_color;
+  outline-offset: 1px;
+}
+
 .image-editor .toolbar {
   padding-top: 4px;
   padding-bottom: 4px;

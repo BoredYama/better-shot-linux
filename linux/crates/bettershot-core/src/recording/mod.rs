@@ -1,25 +1,35 @@
 //! Screen recording projects: the package a recording lives in, its metadata
 //! files, how its deliverable is named and saved, and recovery after a crash.
 //! Ports `Sources/BetterShot/RecordingSession.swift`, `RecordingProject.swift`,
-//! `RecordingDeliverable.swift`, `RecordingRecoveryCoordinator.swift`, and the
-//! state and clock of `ScreenRecordingManager.swift`. Capturing the screen
+//! `RecordingDeliverable.swift`, `RecordingRecoveryCoordinator.swift`, the
+//! state and clock of `ScreenRecordingManager.swift`, and the studio's
+//! models: the edit document and style, the clip timeline, the zoom viewport
+//! springs, and the canvas layout. Capturing the screen
 //! itself is platform work (`bettershot-platform::recorder`).
 //!
 //! Every file keeps the macOS layout and JSON, so a package recorded on one
 //! platform opens on the other.
 
+pub mod clips;
 pub mod deliverable;
+pub mod edit;
+pub mod layout;
 pub mod manifest;
 pub mod recovery;
 pub mod session;
+pub mod viewport;
 
+pub use clips::{ClipSegment, ClipSpeedDraft, ClipTimeline};
 pub use deliverable::{deliverable_path, export_path, file_name, name, needs_render, save};
+pub use edit::{RecordingEditDocument, StudioStyle, UnitRect, VideoCompressionSettings};
+pub use layout::{ContentMode, StudioLayout};
 pub use manifest::{
     CaptureManifest, PointerArtwork, PointerCaptureFile, PointerPressEvent, PointerTravelSample,
     RecordingKeystrokeEvent, RecordingProjectMetadata,
 };
 pub use recovery::{recover_interrupted, PlayableMetadata};
 pub use session::{RecordingSession, RecordingSessionStore, VideoExportContainer};
+pub use viewport::{synthesize_cues, UnitPoint, ViewportFrame, ViewportTimeline, ZoomCue};
 
 use chrono::{DateTime, Utc};
 

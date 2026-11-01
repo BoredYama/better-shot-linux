@@ -267,9 +267,16 @@ pub fn decode<T: serde::de::DeserializeOwned>(data: &[u8]) -> serde_json::Result
     serde_json::from_slice(data)
 }
 
-/// Rebuilds every object with its keys in order, whichever map serde_json uses.
+/// Rebuilds every object with its keys in order, whichever map serde_json
+/// uses, and writes whole doubles as integers, as Foundation does (`2`, not `2.0`).
 pub fn sorted(value: Value) -> Value {
     match value {
+        Value::Number(number) => match number.as_f64() {
+            Some(float) if !number.is_i64() && !number.is_u64() && float.fract() == 0.0 && float.abs() < 9.0e15 => {
+                Value::from(float as i64)
+            }
+            _ => Value::Number(number),
+        },
         Value::Object(map) => {
             let mut entries: Vec<(String, Value)> = map.into_iter().collect();
             entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -304,7 +311,7 @@ mod tests {
         let text = String::from_utf8(encode(&manifest).unwrap()).unwrap();
         assert_eq!(
             text,
-            r#"{"createdAt":"2026-11-01T05:16:39Z","duration":12.5,"includesMicrophone":true,"includesSystemAudio":false,"pixelHeight":1440,"pixelScale":2.0,"pixelWidth":2560,"pointerSynthesized":false,"version":1}"#
+            r#"{"createdAt":"2026-11-01T05:16:39Z","duration":12.5,"includesMicrophone":true,"includesSystemAudio":false,"pixelHeight":1440,"pixelScale":2,"pixelWidth":2560,"pointerSynthesized":false,"version":1}"#
         );
         let decoded: CaptureManifest = decode(text.as_bytes()).unwrap();
         assert_eq!(decoded, manifest);

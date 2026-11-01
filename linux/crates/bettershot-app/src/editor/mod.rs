@@ -2,7 +2,7 @@
 //! inspector, and toolbar, drawn through the shared `bettershot-render`.
 
 mod canvas;
-mod inspector;
+pub(crate) mod inspector;
 pub mod model;
 mod smart_redaction;
 mod window;

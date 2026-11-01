@@ -230,6 +230,24 @@ pub enum CursorAppearance {
 impl CursorAppearance {
     pub const SELECTABLE: [Self; 5] = [Self::Recorded, Self::Arrow, Self::Dark, Self::Light, Self::Dot];
 
+    /// The storage key (`macOS` for Arrow, kept for existing projects).
+    pub fn raw_value(self) -> &'static str {
+        match self {
+            Self::Recorded => "recorded",
+            Self::Arrow => "macOS",
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::Dot => "dot",
+            Self::Hand => "hand",
+        }
+    }
+
+    pub fn from_raw_value(raw: &str) -> Option<Self> {
+        [Self::Recorded, Self::Arrow, Self::Dark, Self::Light, Self::Dot, Self::Hand]
+            .into_iter()
+            .find(|appearance| appearance.raw_value() == raw)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Self::Recorded => "Recorded",

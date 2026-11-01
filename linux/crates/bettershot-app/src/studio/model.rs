@@ -7,12 +7,13 @@
 use bettershot_core::recording::edit::{
     MaskEffect, MaskSegment, RecordingEditDocument, StudioStyle, UnitRect, VideoCompressionSettings,
 };
+use bettershot_core::recording::pointer::{self as pointer, PointerTimelineOptions};
 use bettershot_core::recording::viewport::{UnitPoint, ZoomAnchorMode};
 use bettershot_core::recording::{
-    self, deliverable, ClipSegment, ClipTimeline, ContentMode, PointerCaptureFile, RecordingSession, StudioLayout,
-    ViewportTimeline, ZoomCue,
+    self, deliverable, ClipSegment, ClipTimeline, ContentMode, PointerCaptureFile, PointerTimeline, RecordingSession,
+    StudioLayout, ViewportTimeline, ZoomCue,
 };
-use bettershot_platform::video::{ExportRequest, FrameReader};
+use bettershot_platform::video::{self, ExportRequest, FrameReader};
 use bettershot_render::studio::StudioCompositor;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -27,6 +28,8 @@ pub struct Snapshot {
     pub crop: UnitRect,
     pub masks: Vec<MaskSegment>,
     pub export_settings: VideoCompressionSettings,
+    /// Click pulses over the synthetic pointer (`showsClickEffects`).
+    pub shows_click_effects: bool,
 }
 
 pub struct StudioModel {
@@ -35,6 +38,11 @@ pub struct StudioModel {
     pub source_size: (u32, u32),
     pub has_camera: bool,
     pub camera_lead_in: f64,
+    /// True when the capture hid the system cursor, so the studio draws it
+    /// from `input.json` and can restyle it.
+    pub pointer_synthesized: bool,
+    /// The recording's size in points, for the pointer springs' thresholds.
+    recording_point_size: (f64, f64),
     /// The loaded document, which keeps fields this build does not edit
     /// (subtitles, 3D shots) across saves.
     base_document: RecordingEditDocument,
@@ -48,6 +56,7 @@ pub struct StudioModel {
     pub selected_mask: Option<Uuid>,
     pub scissors: bool,
     pub viewport: ViewportTimeline,
+    pub pointer: PointerTimeline,
     pub screen: FrameReader,
     pub camera: Option<FrameReader>,
     pub compositor: StudioCompositor,
@@ -68,53 +77,55 @@ impl StudioModel {
         let has_camera = session.has_camera();
         let camera = if has_camera { FrameReader::open(&session.camera_path()).ok() } else { None };
         let camera_lead_in = manifest.as_ref().and_then(|m| m.camera_lead_in).unwrap_or(0.0);
+        let pointer_synthesized = manifest.as_ref().is_some_and(|m| !m.pointer_in_pixels());
+        let press_effects_default = manifest.as_ref().and_then(|m| m.press_effects_enabled).unwrap_or(true);
+        let pixel_scale = manifest.as_ref().map(|m| m.pixel_scale).unwrap_or(1.0).max(1.0);
+        let recording_point_size = (f64::from(source_size.0) / pixel_scale, f64::from(source_size.1) / pixel_scale);
         let capture = session.load_pointer_capture().unwrap_or_default();
         let loaded = session.effective_edit_document().and_then(|value| RecordingEditDocument::from_value(&value));
-        let (style, clips, zoom_cues, zoom_enabled, crop, masks, export_settings) = match &loaded {
-            Some(document) => (
-                document.style_value(),
-                document.clip_timeline(source_duration),
-                document.zoom_cues.clone(),
-                document.zoom_enabled,
-                document.crop_value(),
-                document.masks_value(),
-                document.export_settings_value(),
-            ),
-            None => (
-                StudioStyle { camera: Default::default(), ..default_style },
-                ClipTimeline::full(source_duration),
-                recording::synthesize_cues(&capture, source_duration),
-                true,
-                UnitRect::UNIT,
-                Vec::new(),
-                VideoCompressionSettings::default(),
-            ),
+        let snapshot_of = |document: &RecordingEditDocument| Snapshot {
+            style: document.style_value(),
+            clips: document.clip_timeline(source_duration),
+            zoom_cues: document.zoom_cues.clone(),
+            zoom_enabled: document.zoom_enabled,
+            crop: document.crop_value(),
+            masks: document.masks_value(),
+            export_settings: document.export_settings_value(),
+            shows_click_effects: document.shows_click_effects.unwrap_or(press_effects_default),
         };
-        let base_document = loaded.clone().unwrap_or_else(|| RecordingEditDocument::new(&style, &clips));
-        let state = Snapshot { style, clips, zoom_cues, zoom_enabled, crop, masks, export_settings };
+        let state = match &loaded {
+            Some(document) => snapshot_of(document),
+            None => Snapshot {
+                style: StudioStyle { camera: Default::default(), ..default_style },
+                clips: ClipTimeline::full(source_duration),
+                zoom_cues: recording::synthesize_cues(&capture, source_duration),
+                zoom_enabled: true,
+                crop: UnitRect::UNIT,
+                masks: Vec::new(),
+                export_settings: VideoCompressionSettings::default(),
+                shows_click_effects: press_effects_default,
+            },
+        };
+        let base_document = loaded.clone().unwrap_or_else(|| RecordingEditDocument::new(&state.style, &state.clips));
         let saved = match loaded.as_ref().and_then(|_| session.load_edit_document()) {
             // Only an explicit save counts as the saved state; a draft is dirty.
-            Some(value) => RecordingEditDocument::from_value(&value)
-                .map(|document| Snapshot {
-                    style: document.style_value(),
-                    clips: document.clip_timeline(source_duration),
-                    zoom_cues: document.zoom_cues.clone(),
-                    zoom_enabled: document.zoom_enabled,
-                    crop: document.crop_value(),
-                    masks: document.masks_value(),
-                    export_settings: document.export_settings_value(),
-                })
-                .unwrap_or_else(|| state.clone()),
+            Some(value) => {
+                RecordingEditDocument::from_value(&value).map(|d| snapshot_of(&d)).unwrap_or_else(|| state.clone())
+            }
             None => state.clone(),
         };
         let viewport = Self::build_viewport(&state, &capture);
-        let compositor = Self::build_compositor(&state, source_size, has_camera, &viewport);
+        let pointer = Self::build_pointer(&state, &capture, source_duration, recording_point_size, pointer_synthesized);
+        let compositor =
+            Self::build_compositor(&state, source_size, has_camera, &viewport, &pointer, pointer_synthesized);
         Ok(Self {
             session,
             source_duration,
             source_size,
             has_camera,
             camera_lead_in,
+            pointer_synthesized,
+            recording_point_size,
             base_document,
             state,
             saved,
@@ -126,6 +137,7 @@ impl StudioModel {
             selected_mask: None,
             scissors: false,
             viewport,
+            pointer,
             screen,
             camera,
             compositor,
@@ -171,11 +183,40 @@ impl StudioModel {
         }
     }
 
+    /// Port of `rebuildPointerTimeline`: the smoothed cursor along the
+    /// edited timeline, with the chosen style drawn instead of the
+    /// recorded artwork.
+    fn build_pointer(
+        state: &Snapshot,
+        capture: &PointerCaptureFile,
+        source_duration: f64,
+        recording_point_size: (f64, f64),
+        synthesized: bool,
+    ) -> PointerTimeline {
+        if !synthesized || source_duration <= 0.0 {
+            return PointerTimeline::empty();
+        }
+        PointerTimeline::build(
+            capture,
+            source_duration,
+            PointerTimelineOptions {
+                recording_size_in_points: recording_point_size,
+                fallback_artwork: Some(pointer::default_artwork()),
+                hide_after_inactivity: None,
+                clips: Some(&state.clips),
+                cursor: state.style.cursor.clone(),
+                override_artwork: pointer::styled_artwork(state.style.cursor.appearance),
+            },
+        )
+    }
+
     fn build_compositor(
         state: &Snapshot,
         source_size: (u32, u32),
         has_camera: bool,
         viewport: &ViewportTimeline,
+        pointer: &PointerTimeline,
+        synthesized: bool,
     ) -> StudioCompositor {
         let document = RecordingEditDocument::new(&state.style, &state.clips);
         let layout = Self::make_layout(state, source_size, has_camera, &document);
@@ -187,6 +228,12 @@ impl StudioModel {
             state.crop,
             state.masks.clone(),
         )
+        .with_pointer(synthesized.then(|| pointer.clone()), state.shows_click_effects)
+    }
+
+    /// Whether the pointer can be restyled: the capture hid the cursor.
+    pub fn can_style_pointer(&self) -> bool {
+        self.pointer_synthesized
     }
 
     pub fn duration(&self) -> f64 {
@@ -209,10 +256,24 @@ impl StudioModel {
         !self.redo.is_empty()
     }
 
-    /// Rebuilds the camera path and compositor after an edit.
+    /// Rebuilds the camera path, pointer, and compositor after an edit.
     fn invalidate(&mut self) {
         self.viewport = Self::build_viewport(&self.state, &self.capture);
-        self.compositor = Self::build_compositor(&self.state, self.source_size, self.has_camera, &self.viewport);
+        self.pointer = Self::build_pointer(
+            &self.state,
+            &self.capture,
+            self.source_duration,
+            self.recording_point_size,
+            self.pointer_synthesized,
+        );
+        self.compositor = Self::build_compositor(
+            &self.state,
+            self.source_size,
+            self.has_camera,
+            &self.viewport,
+            &self.pointer,
+            self.pointer_synthesized,
+        );
         self.playhead = self.playhead.min(self.duration()).max(0.0);
         if self.selected_clip.is_some_and(|id| !self.state.clips.segments.iter().any(|s| s.id == id)) {
             self.selected_clip = None;
@@ -446,6 +507,7 @@ impl StudioModel {
         document.set_crop(self.state.crop);
         document.set_masks(&self.state.masks);
         document.export_settings = Some(self.state.export_settings.clone());
+        document.shows_click_effects = Some(self.state.shows_click_effects);
         document
     }
 
@@ -477,6 +539,7 @@ impl StudioModel {
     /// screen master can be delivered without a render.
     pub fn is_unedited(&self) -> bool {
         !self.has_camera
+            && !self.pointer_synthesized
             && self.state.clips.is_unedited(self.source_duration)
             && !self.state.style.has_background()
             && (!self.state.zoom_enabled || self.state.zoom_cues.is_empty())
@@ -528,6 +591,8 @@ impl StudioModel {
             viewport: self.viewport.clone(),
             crop: self.state.crop,
             masks: self.state.masks.clone(),
+            pointer: self.pointer_synthesized.then(|| self.pointer.clone()),
+            shows_press_effects: self.state.shows_click_effects,
             canvas: (width as u32, height as u32),
             frames_per_second: settings.effective_frame_rate().frames_per_second(),
             crf: settings.quality.crf(),
@@ -546,4 +611,31 @@ impl StudioModel {
     ) -> std::io::Result<String> {
         deliverable::file_name(&self.session, extension, prefs, chrono::Local::now().naive_local())
     }
+}
+
+/// Port of `RecordingSessionRenderer.ensureDeliverable` for a card's Save:
+/// a capture whose cursor must be drawn, or that has edits or a camera, is
+/// flattened into the package with its effective document (the defaults
+/// when nothing was edited) and stamped, so a later Save reuses it. Blocking;
+/// call from a worker. Returns the file to deliver.
+pub fn ensure_deliverable(session: &RecordingSession, default_style: StudioStyle) -> Result<PathBuf, String> {
+    let document = session.effective_edit_document();
+    let manifest = session.load_capture_manifest();
+    let synthesized = manifest.as_ref().is_some_and(|m| !m.pointer_in_pixels());
+    if !session.has_camera() && !synthesized && document.is_none() {
+        return Ok(session.screen_path());
+    }
+    if let Some(existing) = session.fresh_final_path(document.as_ref()) {
+        return Ok(existing);
+    }
+    let model = StudioModel::load(session.clone(), default_style)?;
+    let container = model.state.export_settings.effective_container();
+    let temporary = session.directory.join(format!("render-{}.{}", Uuid::new_v4(), container.file_extension()));
+    let request = model.export_request(temporary.clone());
+    drop(model);
+    video::export(&request, &|_| {}, &|| false).map_err(|e| e.to_string())?;
+    session.install_final_video(&temporary, document.as_ref()).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        e.to_string()
+    })
 }

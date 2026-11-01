@@ -19,6 +19,7 @@ use bettershot_core::recording::{
 };
 use bettershot_core::shortcuts::Action;
 use bettershot_platform::media;
+use bettershot_platform::pointer::{self, PointerSampler};
 use bettershot_platform::recorder::{Finished, Recorder, RecordingRequest, StartError};
 use chrono::Utc;
 use gtk::{gio, glib};
@@ -39,6 +40,8 @@ enum FinishAction {
 struct Manager {
     state: RecordingState,
     recorder: Option<Recorder>,
+    /// Samples the pointer while the system cursor is hidden (X11 sessions).
+    sampler: Option<PointerSampler>,
     session: Option<RecordingSession>,
     clock: Option<ElapsedClock>,
     timer: Option<glib::SourceId>,
@@ -169,6 +172,7 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
     let request = RecordingRequest {
         mode,
         area: with(|m| m.area),
+        display: display_under_pointer(),
         screen_output: session.screen_path(),
         camera_output: camera.is_some().then(|| session.camera_path()),
         frame_rate,
@@ -187,8 +191,13 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
     if !warnings.is_empty() {
         app.notify("Some recording inputs are unavailable", &warnings.join(" "));
     }
+    // Port of `PointerActivityRecorder.start`: on X11 the cursor is hidden
+    // from the pixels and sampled from the recording's first frame on.
+    let sampler =
+        if recorder.pointer_synthesized() { recorder.capture_region().and_then(PointerSampler::start) } else { None };
     with(|m| {
         m.recorder = Some(recorder);
+        m.sampler = sampler;
         m.clock = Some(ElapsedClock::start(Utc::now()));
     });
     set_state(RecordingState::Recording);
@@ -201,6 +210,18 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
         }
     });
     Ok(())
+}
+
+/// The monitor the pointer is on, for X11 recordings without the portal.
+fn display_under_pointer() -> Option<Rect> {
+    let layout = capture::layout()?;
+    let (x, y) = pointer::position()?;
+    layout
+        .monitors
+        .iter()
+        .map(|(_, rect)| *rect)
+        .find(|rect| x >= rect.min_x() && x < rect.max_x() && y >= rect.min_y() && y < rect.max_y())
+        .or_else(|| layout.monitors.first().map(|(_, rect)| *rect))
 }
 
 async fn select_area(app: &App) -> Result<Option<Rect>, String> {
@@ -229,6 +250,7 @@ fn abandon_start(app: &App, generation: u64, error: Option<String>) {
     }
     with(|m| {
         m.recorder = None;
+        m.sampler = None;
         m.clock = None;
         m.state = RecordingState::Idle;
     });
@@ -282,6 +304,9 @@ pub fn pause() {
         if let Some(clock) = &mut m.clock {
             clock.pause(Utc::now());
         }
+        if let Some(sampler) = &m.sampler {
+            sampler.pause();
+        }
     });
     set_state(RecordingState::Paused);
 }
@@ -298,6 +323,9 @@ pub fn resume() {
     with(|m| {
         if let Some(clock) = &mut m.clock {
             clock.resume(Utc::now());
+        }
+        if let Some(sampler) = &m.sampler {
+            sampler.resume();
         }
     });
     set_state(RecordingState::Recording);
@@ -387,13 +415,14 @@ fn finish(action: FinishAction) {
 }
 
 async fn finalize(app: &App, finished: Option<Finished>) {
-    let (action, session, mode, error_message, on_terminated) = with(|m| {
+    let (action, session, mode, error_message, on_terminated, sampler) = with(|m| {
         (
             m.finish_action.unwrap_or(FinishAction::Preview),
             m.session.take(),
             m.mode,
             m.error_message.take(),
             m.on_terminated.take(),
+            m.sampler.take(),
         )
     });
     with(|m| {
@@ -410,6 +439,14 @@ async fn finalize(app: &App, finished: Option<Finished>) {
     }
 
     if let (Some(session), Some(finished), true) = (&session, &finished, usable) {
+        let synthesized = finished.pointer_synthesized && sampler.is_some();
+        let capture = match sampler {
+            Some(sampler) => {
+                let duration = finished.duration;
+                gio::spawn_blocking(move || sampler.finish(duration)).await.unwrap_or_default()
+            }
+            None => PointerCaptureFile::default(),
+        };
         let manifest = CaptureManifest {
             duration: finished.duration,
             pixel_width: finished.width,
@@ -420,11 +457,13 @@ async fn finalize(app: &App, finished: Option<Finished>) {
             camera_lead_in: finished.camera.as_ref().map(|c| c.lead_in),
             camera_width: finished.camera.as_ref().map(|c| c.width),
             camera_height: finished.camera.as_ref().map(|c| c.height),
-            // The cursor is in the pixels, as in a legacy macOS session.
-            pointer_synthesized: Some(false),
+            // Without samples the cursor is in the pixels, as in a legacy
+            // macOS session; with them the studio draws it (`pointerSynthesized`).
+            pointer_synthesized: Some(synthesized),
+            press_effects_enabled: synthesized.then_some(true),
             ..Default::default()
         };
-        if let Err(error) = session.write_pointer_capture(&PointerCaptureFile::default()) {
+        if let Err(error) = session.write_pointer_capture(&capture) {
             eprintln!("bettershot: the input sidecar could not be written: {error}");
         }
         if let Err(error) = session.write_capture_manifest(&manifest) {

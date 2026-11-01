@@ -5,9 +5,11 @@
 //! written fragmented, so a crash leaves a playable file up to the last
 //! fragment, as the macOS writer does.
 //!
-//! The cursor is embedded in the pixels: GStreamer's `pipewiresrc` drops the
-//! stream's cursor metadata, so a separate pointer timeline (`input.json`)
-//! needs the raw PipeWire API and waits for the video editor's compositor.
+//! On X11 sessions the system cursor is hidden and `crate::pointer` samples
+//! it into `input.json`, so the studio can restyle it; a desktop without
+//! the ScreenCast portal records through `ximagesrc` there. On Wayland the
+//! cursor stays embedded in the pixels: GStreamer's `pipewiresrc` drops the
+//! stream's cursor metadata, and nothing else exposes a global pointer.
 //!
 //! Under `BETTERSHOT_TESTING=1` with `BETTERSHOT_FAKE_SCREEN`, the fixture
 //! image plays as a live source instead of the portal, so recordings can be
@@ -30,6 +32,9 @@ pub struct RecordingRequest {
     pub mode: SourceMode,
     /// For `SourceMode::Area`: the area in the desktop's logical layout.
     pub area: Option<Rect>,
+    /// For `SourceMode::Fullscreen` on X11 without the portal: the monitor
+    /// to record, in the desktop's logical layout (None: the whole screen).
+    pub display: Option<Rect>,
     pub screen_output: PathBuf,
     pub camera_output: Option<PathBuf>,
     pub frame_rate: i64,
@@ -61,6 +66,9 @@ pub struct Finished {
     pub includes_microphone: bool,
     pub camera: Option<CameraResult>,
     pub restore_token: Option<String>,
+    /// True when the system cursor was hidden from the pixels, so the
+    /// caller's pointer samples must be drawn instead.
+    pub pointer_synthesized: bool,
     /// The error that ended the recording early, if any. The file may still
     /// be usable up to that point.
     pub error: Option<String>,
@@ -95,7 +103,16 @@ impl std::error::Error for StartError {}
 pub type Warnings = Vec<String>;
 
 enum Source {
-    Portal { session: Session<Screencast>, stream: Stream, fd: OwnedFd, restore_token: Option<String> },
+    Portal {
+        session: Session<Screencast>,
+        stream: Stream,
+        fd: OwnedFd,
+        restore_token: Option<String>,
+    },
+    /// `ximagesrc` over `region` of the X screen (no portal on this desktop).
+    X11 {
+        region: Rect,
+    },
     Fixture(PathBuf),
 }
 
@@ -113,6 +130,7 @@ pub struct Recorder {
     includes_microphone: bool,
     includes_camera: bool,
     pixel_scale: f64,
+    hides_cursor: bool,
     timing: Arc<Mutex<Timing>>,
     bus_events: async_channel::Receiver<BusEvent>,
     _watch: gst::bus::BusWatchGuard,
@@ -196,7 +214,44 @@ fn classify(error: ashpd::Error) -> StartError {
     }
 }
 
-async fn portal_source(parent: Option<&WindowIdentifier>, request: &RecordingRequest) -> Result<Source, StartError> {
+/// Chooses the source: the portal where it exists, otherwise `ximagesrc`
+/// on an X11 session. Returns the source and whether the cursor is hidden
+/// from its pixels.
+async fn desktop_source(
+    parent: Option<&WindowIdentifier>,
+    request: &RecordingRequest,
+) -> Result<(Source, bool), StartError> {
+    let samples_pointer = crate::pointer::available();
+    match portal_source(parent, request, samples_pointer).await {
+        Ok((source, hides_cursor)) => Ok((source, hides_cursor)),
+        Err(StartError::Unavailable(detail)) if samples_pointer => {
+            if gst::ElementFactory::find("ximagesrc").is_none() {
+                return Err(StartError::Unavailable(format!(
+                    "{detail} GStreamer's ximagesrc element (gstreamer1.0-x) is not installed either."
+                )));
+            }
+            let region = match request.mode {
+                SourceMode::Window => {
+                    return Err(StartError::Unavailable(format!(
+                        "{detail} Without it, only a display or an area can be recorded on X11."
+                    )))
+                }
+                SourceMode::Area => request.area,
+                SourceMode::Fullscreen => request.display,
+            }
+            .or_else(|| crate::pointer::root_size().map(|(w, h)| Rect::new(0.0, 0.0, w, h)))
+            .ok_or(StartError::Unavailable(detail))?;
+            Ok((Source::X11 { region }, true))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn portal_source(
+    parent: Option<&WindowIdentifier>,
+    request: &RecordingRequest,
+    samples_pointer: bool,
+) -> Result<(Source, bool), StartError> {
     let proxy = Screencast::new().await.map_err(classify)?;
     let session = proxy.create_session(Default::default()).await.map_err(classify)?;
     let types: ashpd::enumflags2::BitFlags<SourceType> = match request.mode {
@@ -204,7 +259,15 @@ async fn portal_source(parent: Option<&WindowIdentifier>, request: &RecordingReq
         SourceMode::Fullscreen | SourceMode::Area => SourceType::Monitor.into(),
     };
     let cursor_modes = proxy.available_cursor_modes().await.unwrap_or_default();
-    let cursor = if cursor_modes.contains(CursorMode::Embedded) { CursorMode::Embedded } else { CursorMode::Hidden };
+    // The sampler needs the stream's placement, which windows do not report.
+    let hide = samples_pointer && request.mode != SourceMode::Window && cursor_modes.contains(CursorMode::Hidden);
+    let cursor = if hide {
+        CursorMode::Hidden
+    } else if cursor_modes.contains(CursorMode::Embedded) {
+        CursorMode::Embedded
+    } else {
+        CursorMode::Hidden
+    };
     let options = SelectSourcesOptions::default()
         .set_multiple(false)
         .set_sources(types)
@@ -220,7 +283,7 @@ async fn portal_source(parent: Option<&WindowIdentifier>, request: &RecordingReq
         .cloned()
         .ok_or_else(|| StartError::Failed("The desktop shared no screen stream.".into()))?;
     let fd = proxy.open_pipe_wire_remote(&session, Default::default()).await.map_err(classify)?;
-    Ok(Source::Portal { session, stream, fd, restore_token: streams.restore_token().map(str::to_owned) })
+    Ok((Source::Portal { session, stream, fd, restore_token: streams.restore_token().map(str::to_owned) }, hide))
 }
 
 /// The pixel crop for an area of a stream whose logical placement is known.
@@ -261,13 +324,15 @@ impl Recorder {
     ) -> Result<(Recorder, Warnings), StartError> {
         media::init().map_err(StartError::Unavailable)?;
         let mut warnings = Vec::new();
-        let source = match uses_fixture() {
-            Some(fixture) => Source::Fixture(fixture),
+        let (source, hides_cursor) = match uses_fixture() {
+            // The fixture stands in for the screen; the pointer is still
+            // sampled where the session allows it, as on a real X11 desktop.
+            Some(fixture) => (Source::Fixture(fixture), crate::pointer::available()),
             None => {
-                if gst::ElementFactory::find("pipewiresrc").is_none() {
+                if gst::ElementFactory::find("pipewiresrc").is_none() && !crate::pointer::available() {
                     return Err(StartError::Unavailable("GStreamer's pipewiresrc element is not installed.".into()));
                 }
-                portal_source(parent, &request).await?
+                desktop_source(parent, &request).await?
             }
         };
         let Some(encoder) = video_encoder(request.frame_rate) else {
@@ -286,6 +351,14 @@ impl Recorder {
                 "pipewiresrc fd={} path={} keepalive-time=500 do-timestamp=true",
                 fd.as_raw_fd(),
                 stream.pipe_wire_node_id()
+            ),
+            Source::X11 { region } => format!(
+                "ximagesrc use-damage=false show-pointer={} startx={} starty={} endx={} endy={}",
+                !hides_cursor,
+                region.min_x().round().max(0.0) as i64,
+                region.min_y().round().max(0.0) as i64,
+                (region.max_x().round() as i64 - 1).max(0),
+                (region.max_y().round() as i64 - 1).max(0)
             ),
             Source::Fixture(path) => {
                 format!(
@@ -374,9 +447,13 @@ impl Recorder {
                 stream.position().map(|(x, y)| (f64::from(x), f64::from(y))),
                 stream.size().map(|(w, h)| (f64::from(w), f64::from(h))),
             ),
+            Source::X11 { region } => (Some((region.x, region.y)), Some((region.width, region.height))),
             Source::Fixture(_) => (Some((0.0, 0.0)), None),
         };
-        let area = (request.mode == SourceMode::Area).then_some(request.area).flatten();
+        // `ximagesrc` already reads only the area.
+        let area = (request.mode == SourceMode::Area && !matches!(source, Source::X11 { .. }))
+            .then_some(request.area)
+            .flatten();
         let pixel_scale = Arc::new(Mutex::new(1.0_f64));
         {
             let crop = crop.clone();
@@ -471,6 +548,7 @@ impl Recorder {
             includes_microphone,
             includes_camera,
             pixel_scale: 1.0,
+            hides_cursor,
             timing,
             bus_events,
             _watch: watch,
@@ -495,6 +573,28 @@ impl Recorder {
         }
         recorder.pixel_scale = *pixel_scale.lock().unwrap_or_else(|e| e.into_inner());
         Ok((recorder, warnings))
+    }
+
+    /// Whether the system cursor is hidden from the pixels, so the caller
+    /// should sample the pointer along `capture_region`.
+    pub fn pointer_synthesized(&self) -> bool {
+        self.hides_cursor
+    }
+
+    /// The recorded region in the desktop's root coordinates, for pointer
+    /// sampling. None when the placement is unknown (a window).
+    pub fn capture_region(&self) -> Option<Rect> {
+        let area = (self.request.mode == SourceMode::Area).then_some(self.request.area).flatten();
+        match &self.source {
+            Source::Portal { stream, .. } => {
+                let (x, y) = stream.position().map(|(x, y)| (f64::from(x), f64::from(y))).unwrap_or((0.0, 0.0));
+                let (w, h) =
+                    stream.size().map(|(w, h)| (f64::from(w), f64::from(h))).or_else(crate::pointer::root_size)?;
+                Some(area.unwrap_or(Rect::new(x, y, w, h)))
+            }
+            Source::X11 { region } => Some(*region),
+            Source::Fixture(_) => area.or_else(|| crate::pointer::root_size().map(|(w, h)| Rect::new(0.0, 0.0, w, h))),
+        }
     }
 
     /// An error the pipeline reported since the last check. The footage so
@@ -552,7 +652,7 @@ impl Recorder {
                 let _ = session.close().await;
                 restore_token.clone()
             }
-            Source::Fixture(_) => None,
+            Source::X11 { .. } | Source::Fixture(_) => None,
         };
         let info = media::probe(&self.request.screen_output).ok();
         let (duration, width, height) =
@@ -580,6 +680,7 @@ impl Recorder {
             includes_microphone: self.includes_microphone,
             camera,
             restore_token,
+            pointer_synthesized: self.hides_cursor,
             error: self.error.clone().or(error),
             file_is_usable: info.as_ref().is_some_and(|info| info.playable().is_some()),
         }
@@ -625,6 +726,7 @@ mod tests {
         let request = RecordingRequest {
             mode: SourceMode::Area,
             area: Some(Rect::new(100.0, 100.0, 401.0, 301.0)),
+            display: None,
             screen_output: dir.path().join("screen.mov"),
             camera_output: Some(dir.path().join("camera.mov")),
             frame_rate: 30,

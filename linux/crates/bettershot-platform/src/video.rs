@@ -10,7 +10,7 @@
 
 use crate::media;
 use bettershot_core::recording::edit::{MaskSegment, StudioStyle, UnitRect};
-use bettershot_core::recording::{ClipTimeline, StudioLayout, ViewportTimeline};
+use bettershot_core::recording::{ClipTimeline, PointerTimeline, StudioLayout, ViewportTimeline};
 use bettershot_render::studio::{Frame, StudioCompositor};
 use gst::prelude::*;
 use std::path::{Path, PathBuf};
@@ -268,6 +268,9 @@ pub struct ExportRequest {
     pub viewport: ViewportTimeline,
     pub crop: UnitRect,
     pub masks: Vec<MaskSegment>,
+    /// The synthetic pointer, when the capture hid the system cursor.
+    pub pointer: Option<PointerTimeline>,
+    pub shows_press_effects: bool,
     pub canvas: (u32, u32),
     pub frames_per_second: u32,
     /// x264 constant quality (lower is better).
@@ -454,7 +457,8 @@ pub fn export(
             request.viewport.clone(),
             request.crop,
             request.masks.clone(),
-        );
+        )
+        .with_pointer(request.pointer.clone(), request.shows_press_effects);
         let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width as i32, height as i32)
             .map_err(|e| ExportError::Failed(e.to_string()))?;
         let duration = request.clips.duration();
@@ -572,6 +576,7 @@ mod tests {
         let request = RecordingRequest {
             mode: SourceMode::Fullscreen,
             area: None,
+            display: None,
             screen_output: output.clone(),
             camera_output: None,
             frame_rate: 30,
@@ -633,6 +638,8 @@ mod tests {
             viewport: ViewportTimeline::identity(),
             crop: UnitRect::UNIT,
             masks: Vec::new(),
+            pointer: None,
+            shows_press_effects: true,
             canvas,
             frames_per_second: 30,
             crf: 26,

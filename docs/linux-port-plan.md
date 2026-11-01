@@ -300,11 +300,16 @@ while building it:
   time continuous, so the movie has no gap. An area is cropped from the chosen
   display's stream (`videocrop`, even sizes), since the portal cannot share a
   region. The portal's restore token skips the picker on later recordings.
-- The cursor is embedded in the pixels (`pointerSynthesized: false`, the
-  macOS legacy-session shape). GStreamer's `pipewiresrc` drops the stream's
-  cursor metadata, so a separate pointer timeline needs the raw PipeWire API
-  (`pipewire` crate) and comes with the Phase 6 compositor; `input.json` is
-  written empty. Cursor restyling and press effects therefore wait too.
+- On Wayland the cursor is embedded in the pixels (`pointerSynthesized:
+  false`, the macOS legacy-session shape): GStreamer's `pipewiresrc` drops
+  the stream's cursor metadata, nothing else exposes a global pointer, and a
+  raw PipeWire consumer would need `unsafe` for the SPA metadata, which the
+  workspace forbids. On X11 sessions (`bettershot-platform::pointer`) the
+  portal is asked to hide the cursor and a thread samples `XQueryPointer`,
+  the button mask, and `XQueryKeymap` at 120 Hz into `input.json`
+  (`pointerSynthesized: true`), with pauses excluded; chords with Ctrl, Alt,
+  or Super and special keys are recorded, plain typing never. Without the
+  portal, X11 records displays and areas through `ximagesrc`.
 - System audio comes from the default output's PulseAudio monitor and the
   microphone from `pulsesrc`, each as its own AAC (or Opus) track, as the macOS
   writer keeps them. The camera uses `v4l2src` into `camera.mov`, with
@@ -322,8 +327,7 @@ while building it:
   source and audio/camera use test sources, so `check-ui.sh` records, pauses,
   stops, saves, discards, and recovers without a desktop.
 - Not yet: video share bundles (poster and duration in the manifest), the
-  Camera portal, cursor metadata, and keystroke overlays (Wayland offers no
-  global input).
+  Camera portal, and cursor metadata on Wayland (no global input there).
 
 ### Phase 6: Video editor (done)
 - Timeline with cuts (scissors), speed, trims, zoom segments (port
@@ -370,8 +374,15 @@ building it:
 - Crop and mask areas are set with numeric sliders in the inspector rather
   than handles on the preview, and the camera bubble is placed by the layout
   presets and its sliders, not by dragging.
-- Not yet: the pointer timeline and cursor styles (Phase 5's gap), click
-  effects, keystroke captions, subtitles and transcription, the reframe
+- The pointer timeline (`core::recording::pointer`) is a line-for-line
+  port of the sanitizer, springs, press intervals, and clip remapping; the
+  compositor draws the cursor and the press pulse through the content
+  transform and card clip. The editor's cursor styles keep the macOS artwork
+  ids (`bettershot-cursor-<style>`, 32×40 logical, the same hotspots) but
+  are drawn as cairo vectors, so a project styled on one platform renders
+  the same on the other. A card's Save flattens a synthesized-pointer
+  recording with the default look first (`ensure_deliverable`).
+- Not yet: keystroke captions, subtitles and transcription, the reframe
   presets' UI (documents from macOS keep and apply them), style presets,
   the Projects browser, and 3D shots (Phase 7).
 

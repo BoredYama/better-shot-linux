@@ -12,8 +12,8 @@ use adw::prelude::*;
 use bettershot_core::annotation::background::{BgColor, BgGradient, BgStyle};
 use bettershot_core::app_prefs::AppPreferences;
 use bettershot_core::recording::edit::{
-    CameraAspectRatio, CompressionQuality, CompressionResolution, ExportFrameRate, LayoutPreset, MaskEffect,
-    MaskSegment, StudioStyle, UnitRect,
+    CameraAspectRatio, CompressionQuality, CompressionResolution, CursorAppearance, ExportFrameRate, LayoutPreset,
+    MaskEffect, MaskSegment, StudioStyle, UnitRect,
 };
 use bettershot_core::recording::viewport::{UnitPoint, ZoomAnchorMode};
 use bettershot_core::recording::{self, deliverable, ClipSegment, RecordingSession, VideoExportContainer, ZoomCue};
@@ -53,6 +53,16 @@ struct Inspector {
     padding: Slider,
     corner: Slider,
     shadow: Slider,
+    cursor_note: gtk::Label,
+    cursor_group: gtk::Box,
+    cursor_visible: gtk::Switch,
+    cursor_style: gtk::DropDown,
+    cursor_size: Slider,
+    cursor_smooth: gtk::Switch,
+    click_effects: gtk::Switch,
+    cursor_press: gtk::Switch,
+    cursor_ripple: gtk::Switch,
+    cursor_idle: gtk::Switch,
     camera_group: gtk::Box,
     camera_note: gtk::Label,
     camera_visible: gtk::Switch,
@@ -449,16 +459,67 @@ fn build_inspector(studio: &Rc<Studio>) -> Inspector {
     root.append(&corner.root);
     root.append(&shadow.root);
 
-    // Cursor
+    // Cursor (port of the Cursor tab: styles, size, motion, click effects)
     root.append(&heading("Cursor"));
     let cursor_note = gtk::Label::builder()
-        .label("The cursor was recorded into the picture, so it cannot be restyled or hidden here. Cursor styles come with a separate pointer timeline.")
+        .label("The cursor was recorded into the picture, so it cannot be restyled or hidden here. Record on an X11 session to get a restylable pointer.")
         .wrap(true)
         .max_width_chars(34)
         .xalign(0.0)
         .css_classes(["dim-label", "caption"])
         .build();
     root.append(&cursor_note);
+    let cursor_group = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let (cursor_visible_row, cursor_visible) = switch_row("Show cursor");
+    let styles: Vec<&str> = CursorAppearance::SELECTABLE.iter().map(|a| a.title()).collect();
+    let (cursor_style_row, cursor_style) = dropdown("Style", &styles);
+    let weak = Rc::downgrade(studio);
+    cursor_style.connect_selected_notify(move |list| {
+        let Some(studio) = weak.upgrade() else { return };
+        if studio.updating.get() {
+            return;
+        }
+        let appearance = CursorAppearance::SELECTABLE[(list.selected() as usize).min(4)];
+        studio.model.borrow_mut().edit(|s| s.style.cursor.appearance = appearance);
+        studio.after_edit(true);
+    });
+    let cursor_size = slider("Size", 1.0, 4.0, 0.1, 1);
+    connect_slider(studio, &cursor_size, "cursor-size", |m, v| m.edit_coalesced(|s| s.style.cursor_scale = v));
+    let (cursor_smooth_row, cursor_smooth) = switch_row("Smooth motion");
+    let (click_effects_row, click_effects) = switch_row("Click effects");
+    let (cursor_press_row, cursor_press) = switch_row("Press");
+    let (cursor_ripple_row, cursor_ripple) = switch_row("Ripple");
+    let (cursor_idle_row, cursor_idle) = switch_row("Hide when idle");
+    type CursorToggle = fn(&mut super::model::Snapshot, bool);
+    let toggles: [(&gtk::Switch, CursorToggle); 6] = [
+        (&cursor_visible, |s, on| s.style.cursor.is_visible = on),
+        (&cursor_smooth, |s, on| s.style.cursor.smooth_motion = on),
+        (&click_effects, |s, on| s.shows_click_effects = on),
+        (&cursor_press, |s, on| s.style.cursor.press_effect = on),
+        (&cursor_ripple, |s, on| s.style.cursor.ripple_effect = on),
+        (&cursor_idle, |s, on| s.style.cursor.hide_when_idle = on),
+    ];
+    for (switch, apply) in toggles {
+        let weak = Rc::downgrade(studio);
+        switch.connect_active_notify(move |switch| {
+            let Some(studio) = weak.upgrade() else { return };
+            if studio.updating.get() {
+                return;
+            }
+            let on = switch.is_active();
+            studio.model.borrow_mut().edit(|s| apply(s, on));
+            studio.after_edit(true);
+        });
+    }
+    for widget in [&cursor_visible_row, &cursor_style_row, &cursor_size.root, &cursor_smooth_row, &click_effects_row] {
+        cursor_group.append(widget);
+    }
+    for row in [&cursor_press_row, &cursor_ripple_row] {
+        row.set_margin_start(16);
+        cursor_group.append(row);
+    }
+    cursor_group.append(&cursor_idle_row);
+    root.append(&cursor_group);
 
     // Camera
     root.append(&heading("Camera"));
@@ -865,6 +926,16 @@ fn build_inspector(studio: &Rc<Studio>) -> Inspector {
         padding,
         corner,
         shadow,
+        cursor_note,
+        cursor_group,
+        cursor_visible,
+        cursor_style,
+        cursor_size,
+        cursor_smooth,
+        click_effects,
+        cursor_press,
+        cursor_ripple,
+        cursor_idle,
         camera_group,
         camera_note,
         camera_visible,
@@ -1139,6 +1210,22 @@ impl Studio {
             i.padding.adjustment.set_value(style.padding);
             i.corner.adjustment.set_value(style.corner_radius);
             i.shadow.adjustment.set_value(style.shadow);
+            let styles_pointer = model.can_style_pointer();
+            i.cursor_note.set_visible(!styles_pointer);
+            i.cursor_group.set_visible(styles_pointer);
+            i.cursor_visible.set_active(style.cursor.is_visible);
+            i.cursor_style.set_selected(
+                CursorAppearance::SELECTABLE.iter().position(|a| *a == style.cursor.appearance).unwrap_or(0) as u32,
+            );
+            i.cursor_size.adjustment.set_value(style.cursor_scale);
+            i.cursor_smooth.set_active(style.cursor.smooth_motion);
+            i.click_effects.set_active(model.state.shows_click_effects);
+            i.cursor_press.set_active(style.cursor.press_effect);
+            i.cursor_ripple.set_active(style.cursor.ripple_effect);
+            i.cursor_idle.set_active(style.cursor.hide_when_idle);
+            for control in [&i.cursor_press, &i.cursor_ripple] {
+                control.set_sensitive(model.state.shows_click_effects);
+            }
             i.camera_note.set_visible(!model.has_camera);
             i.camera_group.set_visible(model.has_camera);
             i.camera_visible.set_active(style.camera.is_visible);

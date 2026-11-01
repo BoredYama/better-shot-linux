@@ -5,14 +5,18 @@
 //! The preview and the exporter both draw through `compose`, so what you see
 //! is what you export.
 //!
-//! Not yet drawn on Linux: the synthetic pointer and click effects (the
-//! cursor is in the pixels), keystroke captions, subtitles, motion-blur
+//! When the capture hid the system cursor, the synthetic pointer and its
+//! click pulse are drawn along the `PointerTimeline` through the same
+//! viewport transform and card clip as the source pixels (`drawPointer`).
+//!
+//! Not yet drawn on Linux: keystroke captions, subtitles, motion-blur
 //! supersampling, and 3D shots.
 
 use crate::{blur, draw_background_style, draw_soft_shadow, rounded_rect, RenderCache, SoftShadow};
 use bettershot_core::geometry::Rect;
-use bettershot_core::recording::edit::{MaskEffect, MaskSegment, StudioStyle, UnitRect};
-use bettershot_core::recording::{StudioLayout, ViewportFrame, ViewportTimeline};
+use bettershot_core::recording::edit::{CursorAppearance, MaskEffect, MaskSegment, StudioStyle, UnitRect};
+use bettershot_core::recording::pointer::{press_effect_geometry, ARTWORK_HEIGHT_RATIO, PRESS_EFFECT_COLOR};
+use bettershot_core::recording::{PointerArtwork, PointerTimeline, StudioLayout, ViewportFrame, ViewportTimeline};
 use image::RgbaImage;
 use std::collections::HashMap;
 
@@ -80,11 +84,15 @@ pub struct StudioCompositor {
     pub viewport: ViewportTimeline,
     pub crop: UnitRect,
     pub masks: Vec<MaskSegment>,
+    /// The synthetic pointer, when the capture hid the system cursor.
+    pub pointer: Option<PointerTimeline>,
+    pub shows_press_effects: bool,
     backdrop: Option<cairo::ImageSurface>,
     cache: RenderCache,
     screen_surface: Option<(u64, cairo::ImageSurface)>,
     camera_surface: Option<(u64, cairo::ImageSurface)>,
     mask_surfaces: HashMap<(u64, usize), (cairo::ImageSurface, u32, u32)>,
+    artwork_surfaces: HashMap<String, Option<cairo::ImageSurface>>,
 }
 
 impl StudioCompositor {
@@ -103,12 +111,23 @@ impl StudioCompositor {
             viewport,
             crop,
             masks,
+            pointer: None,
+            shows_press_effects: true,
             backdrop: None,
             cache: RenderCache::default(),
             screen_surface: None,
             camera_surface: None,
             mask_surfaces: HashMap::new(),
+            artwork_surfaces: HashMap::new(),
         }
+    }
+
+    /// Draws the synthetic pointer along `timeline` (None: the cursor is in
+    /// the pixels).
+    pub fn with_pointer(mut self, timeline: Option<PointerTimeline>, shows_press_effects: bool) -> Self {
+        self.pointer = timeline;
+        self.shows_press_effects = shows_press_effects;
+        self
     }
 
     /// Replaces the camera path, keeping cached frames.
@@ -209,6 +228,7 @@ impl StudioCompositor {
                 self.draw_masks(cr, screen, &content, editor_time);
                 let _ = cr.restore();
             }
+            self.draw_pointer(cr, editor_time);
         }
 
         if let Some(camera) = camera.filter(|_| self.layout.bubble_rect.width > 0.0) {
@@ -311,6 +331,89 @@ impl StudioCompositor {
         }
     }
 
+    /// The cursor and click pulse for `editor_time`, clipped to the card and
+    /// placed through the content transform like the source pixels. The
+    /// interaction magnification and tilt pivot on the artwork's hotspot.
+    fn draw_pointer(&mut self, cr: &cairo::Context, editor_time: f64) {
+        let Some(timeline) = &self.pointer else { return };
+        let Some(pointer) = timeline.frame(editor_time) else { return };
+        let draw_rect = self.content_rect(editor_time);
+        let tip =
+            (draw_rect.x + pointer.location.x * draw_rect.width, draw_rect.y + pointer.location.y * draw_rect.height);
+        let card = self.layout.card_rect;
+        let _ = cr.save();
+        rounded_rect(cr, (card.x, card.y, card.width, card.height), [self.layout.card_corner_radius; 4]);
+        cr.clip();
+        if self.shows_press_effects {
+            if let Some(press) = &pointer.press {
+                let press_tip = (
+                    draw_rect.x + press.location.x * draw_rect.width,
+                    draw_rect.y + press.location.y * draw_rect.height,
+                );
+                let effect =
+                    press_effect_geometry(press.progress, self.layout.content_fill_size.1, self.style.cursor_scale);
+                let (r, g, b) = PRESS_EFFECT_COLOR;
+                if press.impact_enabled && effect.impact_opacity > 0.0 {
+                    cr.set_source_rgba(r, g, b, effect.impact_opacity);
+                    cr.arc(press_tip.0, press_tip.1, effect.impact_radius, 0.0, std::f64::consts::TAU);
+                    let _ = cr.fill();
+                }
+                if press.ripple_enabled && effect.ripple_opacity > 0.0 {
+                    cr.set_source_rgba(r, g, b, effect.ripple_opacity);
+                    cr.set_line_width(effect.ripple_line_width);
+                    cr.arc(press_tip.0, press_tip.1, effect.ripple_radius, 0.0, std::f64::consts::TAU);
+                    let _ = cr.stroke();
+                }
+            }
+        }
+        if let Some(artwork) = timeline.artwork(pointer.artwork_id.as_deref()).cloned() {
+            let height = self.layout.content_fill_size.1
+                * ARTWORK_HEIGHT_RATIO
+                * self.style.cursor_scale
+                * artwork.intrinsic_scale();
+            let size = (height * artwork.aspect_ratio(), height);
+            let anchor = artwork.normalized_anchor();
+            let _ = cr.save();
+            cr.translate(tip.0, tip.1);
+            cr.rotate(pointer.tilt_degrees.to_radians());
+            let interaction = pointer.magnification.max(0.1);
+            cr.scale(interaction, interaction);
+            cr.translate(-anchor.x * size.0, -anchor.y * size.1);
+            let opacity = pointer.opacity.clamp(0.0, 1.0);
+            if opacity > 0.001 && size.1 > 0.5 {
+                match artwork.styled_appearance() {
+                    Some(appearance) => draw_styled_cursor(cr, appearance, size, opacity),
+                    None => {
+                        if let Some(surface) = self.artwork_surface(&artwork) {
+                            let _ = cr.save();
+                            cr.scale(
+                                size.0 / f64::from(surface.width().max(1)),
+                                size.1 / f64::from(surface.height().max(1)),
+                            );
+                            let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+                            cr.source().set_filter(cairo::Filter::Good);
+                            let _ = cr.paint_with_alpha(opacity);
+                            let _ = cr.restore();
+                        }
+                    }
+                }
+            }
+            let _ = cr.restore();
+        }
+        let _ = cr.restore();
+    }
+
+    /// The decoded PNG of a recorded cursor, cached by artwork id.
+    fn artwork_surface(&mut self, artwork: &PointerArtwork) -> Option<cairo::ImageSurface> {
+        self.artwork_surfaces
+            .entry(artwork.artwork_id.clone())
+            .or_insert_with(|| {
+                let decoded = image::load_from_memory(&artwork.image_data).ok()?.to_rgba8();
+                crate::surface::to_surface(&decoded).ok()
+            })
+            .clone()
+    }
+
     /// Renders one frame to pixels, for exports and tests.
     pub fn render(
         &mut self,
@@ -345,12 +448,56 @@ impl StudioCompositor {
     }
 }
 
+/// Port of `PointerArtworkCapture.styledArtwork`'s vector masters: the
+/// editor's cursor styles drawn in their 32×40 logical space, scaled to
+/// `size`. The tip (5, 4) is the hotspot; the dot's center is (16, 20).
+pub fn draw_styled_cursor(cr: &cairo::Context, appearance: CursorAppearance, size: (f64, f64), opacity: f64) {
+    let _ = cr.save();
+    cr.scale(size.0 / 32.0, size.1 / 40.0);
+    let dark = matches!(appearance, CursorAppearance::Dark | CursorAppearance::Arrow);
+    let (fill, stroke) = if dark { (0.0, 1.0) } else { (1.0, 0.0) };
+    match appearance {
+        CursorAppearance::Dot => {
+            cr.arc(16.0, 20.0, 11.0, 0.0, std::f64::consts::TAU);
+        }
+        CursorAppearance::Arrow => {
+            // Stemless arrow from the editor reference.
+            cr.move_to(5.0, 4.0);
+            cr.line_to(29.0, 17.0);
+            cr.line_to(16.0, 21.0);
+            cr.line_to(11.0, 32.0);
+            cr.close_path();
+        }
+        CursorAppearance::Hand => {
+            // A pointing hand: the index finger over the palm.
+            rounded_rect(cr, (9.0, 4.0, 7.0, 20.0), [3.5; 4]);
+            rounded_rect(cr, (6.0, 16.0, 20.0, 20.0), [5.0; 4]);
+        }
+        _ => {
+            cr.move_to(5.0, 4.0);
+            for (x, y) in [(26.0, 23.0), (17.0, 24.0), (22.0, 34.0), (17.0, 36.0), (12.0, 26.0), (5.0, 32.0)] {
+                cr.line_to(x, y);
+            }
+            cr.close_path();
+        }
+    }
+    cr.set_source_rgba(fill, fill, fill, opacity);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(stroke, stroke, stroke, opacity);
+    cr.set_line_width(if appearance == CursorAppearance::Arrow { 1.8 } else { 1.5 });
+    cr.set_line_join(cairo::LineJoin::Round);
+    let _ = cr.stroke();
+    let _ = cr.restore();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bettershot_core::annotation::background::{BgColor, BgStyle};
     use bettershot_core::recording::edit::{CameraBubbleSettings, LayoutPreset};
+    use bettershot_core::recording::pointer::{styled_artwork, PointerTimelineOptions};
     use bettershot_core::recording::ContentMode;
+    use bettershot_core::recording::{PointerCaptureFile, PointerPressEvent, PointerTravelSample};
 
     fn compositor(style: StudioStyle, camera: bool, crop: UnitRect, masks: Vec<MaskSegment>) -> StudioCompositor {
         let layout = StudioLayout::make((400.0, 300.0), &style, camera, None, ContentMode::Fill);
@@ -416,6 +563,54 @@ mod tests {
         let later = compositor.render(&screen, None, 1.0).unwrap();
         let unmasked = pixel(&later, 10, 150);
         assert!(unmasked == (255, 255, 255) || unmasked == (0, 0, 0));
+    }
+
+    #[test]
+    fn synthetic_pointer_and_press_pulse_are_drawn() {
+        let style = StudioStyle { background: BgStyle::None, ..Default::default() };
+        let capture = PointerCaptureFile {
+            travel: vec![PointerTravelSample {
+                time: 0.0,
+                x: 0.25,
+                y: 0.5,
+                kind: Default::default(),
+                artwork_id: None,
+            }],
+            presses: vec![PointerPressEvent {
+                time: 1.0,
+                x: 0.25,
+                y: 0.5,
+                button: 0,
+                phase: bettershot_core::recording::manifest::PressPhase::Down,
+                artwork_id: None,
+            }],
+            ..Default::default()
+        };
+        let options = PointerTimelineOptions {
+            fallback_artwork: Some(bettershot_core::recording::pointer::default_artwork()),
+            override_artwork: styled_artwork(CursorAppearance::Light),
+            ..Default::default()
+        };
+        let timeline = PointerTimeline::build(&capture, 2.0, options);
+        let mut compositor = compositor(style, false, UnitRect::UNIT, Vec::new()).with_pointer(Some(timeline), true);
+        let screen = Frame::solid(400, 300, (255, 0, 0), 0.0, 1);
+        // Before the click: the light cursor's white body sits just below and right of its tip.
+        let image = compositor.render(&screen, None, 0.5).unwrap();
+        let body = pixel(&image, 100 + 6, 150 + 10);
+        assert!(body.1 > 200 && body.2 > 200, "the light cursor is drawn: {body:?}");
+        assert_eq!(pixel(&image, 300, 150), (255, 0, 0));
+        // Just after the click the blue impact fills around the press point.
+        let clicked = compositor.render(&screen, None, 1.03).unwrap();
+        let halo = pixel(&clicked, 100 - 4, 150 + 2);
+        assert!(halo.2 > 20 && halo.0 < 240, "the blue pulse tints the frame: {halo:?}");
+        // Without press effects the halo is gone but the cursor stays.
+        compositor.shows_press_effects = false;
+        let quiet = compositor.render(&screen, None, 1.03).unwrap();
+        assert_eq!(pixel(&quiet, 100 - 4, 150 + 2), (255, 0, 0));
+        // Hidden cursors draw nothing at all.
+        compositor.pointer = None;
+        let bare = compositor.render(&screen, None, 0.5).unwrap();
+        assert_eq!(pixel(&bare, 106, 160), (255, 0, 0));
     }
 
     #[test]

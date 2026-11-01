@@ -448,7 +448,12 @@ PY
       "$BIN" record area; sleep 1.5
       drag_to 700 120 1180 760
       shot "$SCENARIO-$APPEARANCE-3-area"
-      xdotool key Return; sleep 3
+      xdotool key Return; sleep 1
+      # Once the recording row shows, pointer travel and a click inside the
+      # area land in input.json.
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 1.5
+      xdotool mousemove 800 300; sleep 0.3; xdotool mousemove 1000 500; sleep 0.3
+      xdotool mousedown 1; sleep 0.15; xdotool mouseup 1; sleep 0.5
       [[ -n "$(window_titled 'Capture Bar')" ]] || fail "the recording bar is not showing"
       shot "$SCENARIO-$APPEARANCE-4-recording"
       "$BIN" record pause; sleep 1.5
@@ -461,13 +466,18 @@ PY
       local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
       [[ -n "$package" && -f "$package/screen.mov" && -f "$package/capture.json" && -f "$package/poster.jpg" && -f "$package/input.json" ]] || fail "the package is incomplete: $(ls "$package" 2>/dev/null)"
       [[ $(saved_files | wc -l) -eq 1 && "$(saved_files)" == *.mp4 ]] || fail "automatic saving wrote $(saved_files | wc -l) files"
-      python3 - "$package/capture.json" "$BETTERSHOT_TEST_ROOT/data/Library/history.json" <<'PY' || fail "the manifest or library entry is wrong"
+      python3 - "$package/capture.json" "$BETTERSHOT_TEST_ROOT/data/Library/history.json" "$package/input.json" <<'PY' || fail "the manifest or library entry is wrong"
 import json, sys
 m = json.load(open(sys.argv[1]))
 print(m, file=sys.stderr)
-ok = (m["pixelWidth"], m["pixelHeight"]) == (480, 640) and 2.0 < m["duration"] < 5.0 and m["pointerSynthesized"] is False
+# Under Xvfb the session is X11, so the cursor is hidden and sampled into input.json.
+ok = (m["pixelWidth"], m["pixelHeight"]) == (480, 640) and 2.0 < m["duration"] < 9.0 and m["pointerSynthesized"] is True
 records = json.load(open(sys.argv[2]))
 ok = ok and any(r["kind"] == "recording" and r["pixelWidth"] == 480 for r in records)
+pointer = json.load(open(sys.argv[3]))
+print(len(pointer["travel"]), "travel samples,", [(e["phase"], round(e["x"], 3), round(e["y"], 3), round(e["time"], 2)) for e in pointer["presses"]], file=sys.stderr)
+ok = ok and len(pointer["travel"]) >= 2 and all(0 <= s["x"] <= 1 and 0 <= s["y"] <= 1 for s in pointer["travel"])
+ok = ok and [p["phase"] for p in pointer["presses"]] == ["down", "up"] and abs(pointer["presses"][0]["x"] - 300 / 480) < 0.02
 sys.exit(0 if ok else 1)
 PY
       local probe; probe="$(gst-discoverer-1.0 "$(saved_files)" 2>/dev/null || true)"
@@ -553,6 +563,54 @@ PY
       [[ -n "$studio" ]] || fail "the studio did not reopen"
       xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
       shot "$SCENARIO-$APPEARANCE-6-reopened"
+      ;;
+    cursor)
+      # Record the fixture with pointer travel and a click (sampled from X11
+      # with the cursor hidden), then restyle the cursor in the studio.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 1.5
+      xdotool mousemove 300 300; sleep 0.3; xdotool mousemove 900 500; sleep 0.3
+      xdotool mousedown 1; sleep 0.15; xdotool mouseup 1; sleep 0.5
+      xdotool mousemove 400 600; sleep 0.6
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" ]] || fail "no recording package"
+      python3 - "$package/capture.json" "$package/input.json" <<'PY' || fail "the pointer was not sampled"
+import json, sys
+m = json.load(open(sys.argv[1])); p = json.load(open(sys.argv[2]))
+print(len(p["travel"]), "travel samples", [(e["phase"], round(e["x"], 2), round(e["y"], 2)) for e in p["presses"]], file=sys.stderr)
+ok = m["pointerSynthesized"] is True and len(p["travel"]) >= 3
+ok = ok and [e["phase"] for e in p["presses"]] == ["down", "up"] and abs(p["presses"][0]["x"] - 900 / 1280) < 0.01
+sys.exit(0 if ok else 1)
+PY
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      eval "$(xdotool getwindowgeometry --shell "$studio")"
+      local sx=$X sy=$Y
+      # Step to the click (about 1.2 s in): the pulse and the recorded cursor show.
+      xdotool key --repeat 38 --delay 15 Right; sleep 0.8
+      shot "$SCENARIO-$APPEARANCE-2-recorded-cursor"
+      # Style › Arrow through the dropdown.
+      click_at $((sx + 190)) $((sy + 600)); sleep 0.6
+      shot "$SCENARIO-$APPEARANCE-3-styles"
+      xdotool key Down; sleep 0.2; xdotool key Return; sleep 0.8
+      shot "$SCENARIO-$APPEARANCE-4-arrow"
+      # Click effects off hides the pulse; undo brings it back.
+      click_at $((sx + 220)) $((sy + 742)); sleep 0.5
+      xdotool key ctrl+z; sleep 0.5
+      xdotool key ctrl+s; sleep 14
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the cursor style"
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d["style"].get("cursor"), d.get("showsClickEffects"), file=sys.stderr)
+sys.exit(0 if d["style"]["cursor"]["appearance"] == "macOS" and d["showsClickEffects"] is True and d["formatVersion"] == 8 else 1)
+PY
+      [[ -n "$(find "$package" -maxdepth 1 -name '*.mp4' | head -1)" ]] || fail "Save did not render the deliverable"
+      [[ $(saved_files | wc -l) -eq 1 ]] || fail "Save wrote $(saved_files | wc -l) files"
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
       ;;
     hide)
       "$BIN" capture region; sleep 1.5
@@ -696,5 +754,8 @@ for appearance in light dark; do
 done
 for appearance in light dark; do
   scenario record "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": true}"
+done
+for appearance in light dark; do
+  scenario cursor "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": false}"
 done
 echo "Snapshots: $OUT"

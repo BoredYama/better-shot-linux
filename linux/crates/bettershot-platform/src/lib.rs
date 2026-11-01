@@ -6,6 +6,7 @@
 pub mod devices;
 pub mod global_shortcuts;
 pub mod media;
+pub mod pointer;
 pub mod r2_client;
 pub mod recorder;
 pub mod screenshot;

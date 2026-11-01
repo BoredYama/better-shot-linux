@@ -2,7 +2,8 @@
 //! (`PreviewOverlay.swift` for recordings): its poster and duration with
 //! Save, Copy, Open, Delete, and Dismiss. Save writes the deliverable through
 //! `RecordingDeliverable`'s rules, so a second Save replaces the first file.
-//! Until the video editor is ported, the deliverable is the screen master.
+//! A capture whose cursor was hidden (or that has a camera or edits) is
+//! flattened by the studio's renderer first, as `ensureDeliverable` does.
 
 use crate::app::App;
 use crate::clipboard;
@@ -301,12 +302,18 @@ impl Card {
                 return;
             }
         };
-        let needs_studio = deliverable::needs_render(&session);
-        let source = deliverable::deliverable_path(&session);
+        let renders = deliverable::needs_render(&session);
+        if renders {
+            self.set_status("Rendering…", false);
+        }
+        let default_style =
+            app.with_prefs(|p| core_recording::StudioStyle::from_defaults(&p.default_beautifier_config()));
         let weak = Rc::downgrade(&self.0);
         glib::spawn_future_local(async move {
             let for_save = session.clone();
             let result = gio::spawn_blocking(move || {
+                let source = crate::studio::model::ensure_deliverable(&for_save, default_style)
+                    .map_err(std::io::Error::other)?;
                 deliverable::save(&source, &file_name, Some(&for_save), true, &save_dir, media::write_video)
             })
             .await
@@ -322,12 +329,7 @@ impl Card {
                         .and_then(Path::file_name)
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "your folder".into());
-                    let note = if needs_studio {
-                        " This recording’s pointer needs BetterShot Studio on macOS to render."
-                    } else {
-                        ""
-                    };
-                    card.set_status(&format!("Saved to {folder}{note}"), false);
+                    card.set_status(&format!("Saved to {folder}"), false);
                     let app = App::get();
                     if app.with_prefs(|p| p.copy_after_save()) {
                         let _ = clipboard::copy_file_reference(&path);

@@ -15,6 +15,7 @@ pub mod deliverable;
 pub mod edit;
 pub mod layout;
 pub mod manifest;
+pub mod pointer;
 pub mod recovery;
 pub mod session;
 pub mod viewport;
@@ -27,6 +28,7 @@ pub use manifest::{
     CaptureManifest, PointerArtwork, PointerCaptureFile, PointerPressEvent, PointerTravelSample,
     RecordingKeystrokeEvent, RecordingProjectMetadata,
 };
+pub use pointer::{PointerFrame, PointerTimeline, PointerTimelineOptions};
 pub use recovery::{recover_interrupted, PlayableMetadata};
 pub use session::{RecordingSession, RecordingSessionStore, VideoExportContainer};
 pub use viewport::{synthesize_cues, UnitPoint, ViewportFrame, ViewportTimeline, ZoomCue};

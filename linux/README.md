@@ -27,7 +27,9 @@ barcodes. Cloud sharing stores its keys with a Secret Service provider (GNOME
 Keyring, KWallet, or KeePassXC), which desktops normally run. Screen
 recording needs GStreamer 1.20 or later with its PipeWire source, an H.264
 encoder (x264, VA-API, or OpenH264), an AAC or Opus encoder, and the
-ScreenCast portal that desktops ship for screen sharing.
+ScreenCast portal that desktops ship for screen sharing. On an X11 session
+without that portal, recording falls back to GStreamer's `ximagesrc` (in
+gstreamer1.0-plugins-good) for displays and areas.
 
 ```bash
 # Ubuntu / Debian
@@ -180,7 +182,10 @@ double-click), the Media Gallery's Edit, `bettershot edit <project>`, or
 automatically after recording with Settings › General › Open the editor. The
 inspector on the left has Background (the gradients and colors, padding,
 corner radius, and shadow; new recordings start from General › Default Look),
-Cursor (recorded into the picture, so not restyled yet), Camera (show, the
+Cursor (on recordings made in an X11 session: show, Recorded, Arrow, Dark,
+Light, or Dot styles, size, smooth motion, click effects with press and
+ripple, and hiding when idle; Wayland recordings keep the cursor in the
+picture), Camera (show, the
 Bubble, Overlap, Side-by-Side, Presenter, Camera Only, and Screen Only
 layouts, side, size, roundness, and frame ratio), Effects (a crop and blur or
 pixelate masks, each with an area, strength, and time range), Zoom & Clips
@@ -217,16 +222,19 @@ for example `bettershot capture region`.
 - **The capture bar appears in display recordings.** Wayland cannot keep an
   app's own windows out of a screen share, so move the bar off the recorded
   area, record a window, or stop with the tray or a shortcut.
-- **The cursor is recorded as pixels.** GStreamer's PipeWire source drops the
-  stream's cursor metadata, so recordings have no separate pointer timeline;
-  cursor restyling and click effects come with the video editor.
+- **On Wayland the cursor is recorded as pixels.** GStreamer's PipeWire
+  source drops the stream's cursor metadata and Wayland exposes no global
+  pointer, so those recordings have no separate pointer timeline and the
+  studio cannot restyle or hide the cursor or add click effects. X11
+  sessions hide the system cursor and sample the pointer, buttons, and
+  keyboard chords (never plain typing) into `input.json` instead; a card's
+  Save then renders the recording with the default look, as macOS does.
 - **The studio preview is silent** and plays by stepping frames; audio is
   only in the exported file. There is no motion blur during zooms, crop and
   mask areas are set with sliders rather than handles, the camera bubble is
-  placed by its layout and sliders, and pointer styling, click effects,
-  keystroke captions, subtitles, reframe presets, style presets, and 3D shots
-  from macOS projects are kept but not shown. A card's Save without opening
-  the studio still delivers the recording as recorded.
+  placed by its layout and sliders, and keystroke captions, subtitles,
+  reframe presets, style presets, and 3D shots from macOS projects are kept
+  but not shown.
 - **Area recordings** are cropped from the display your desktop's dialog
   shares. Pick the display that holds the area; if it does not, the whole
   display is recorded.

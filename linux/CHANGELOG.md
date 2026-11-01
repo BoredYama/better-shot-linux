@@ -34,6 +34,10 @@ that section as What's New after an update.
 - **Packages.** `make deb`, `make appimage`, and `make flatpak` build a Debian package, an AppImage, and a Flatpak.
 - **Desktop integration.** Global shortcuts through the GlobalShortcuts portal (Super+Shift+4 for an area, as on macOS with Super for ⌘), a tray icon, app-menu actions, `bettershot://` links, and a `bettershot` command for every capture, usable as a custom shortcut where the portal is missing.
 
+### Changed
+
+- **Capture cards are Large by default.** The macOS default, Small, is a 180-point card, which is hard to read on the 1x displays most Linux desktops use. Settings › Cards › Card size still offers Small and Medium, and a size chosen earlier is kept.
+
 ### Fixed
 
 - Share links saved with a capture now use the same key as the macOS app (`shareURL`), so a library shared between the two keeps them. Links saved by earlier development builds still load.

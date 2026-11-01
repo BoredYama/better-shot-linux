@@ -195,9 +195,12 @@ impl AppPreferences<'_> {
         self.overlay_dismiss_delay() < OVERLAY_DISMISS_NEVER
     }
 
+    /// The capture card's size. macOS defaults to Small; Linux desktops run
+    /// at 1x far more often, where a 180-point card is hard to read, so an
+    /// unset preference means Large here.
     pub fn overlay_card_size(&self) -> OverlayCardSize {
         let raw = self.prefs.string(keys::OVERLAY_CARD_SIZE).unwrap_or_default();
-        OverlayCardSize::ALL.into_iter().find(|s| s.raw_value() == raw).unwrap_or_default()
+        OverlayCardSize::ALL.into_iter().find(|s| s.raw_value() == raw).unwrap_or(OverlayCardSize::Large)
     }
 
     pub fn overlay_tool_layout(&self) -> OverlayToolLayout {
@@ -354,6 +357,17 @@ pub fn desktop_flashes_screenshots() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cards_default_to_large_on_linux_and_honor_the_shared_key() {
+        let dirs = AppDirs::resolve(|_| None);
+        let mut prefs = Preferences::in_memory();
+        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Large);
+        prefs.set(keys::OVERLAY_CARD_SIZE, "small").unwrap();
+        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Small);
+        prefs.set(keys::OVERLAY_CARD_SIZE, "huge").unwrap();
+        assert_eq!(AppPreferences { prefs: &prefs, dirs: &dirs }.overlay_card_size(), OverlayCardSize::Large);
+    }
 
     #[test]
     fn defaults_match_macos() {

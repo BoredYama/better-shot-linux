@@ -84,6 +84,8 @@ scenario() {
 import json, sys
 settings = json.load(open(sys.argv[1]))
 settings.setdefault("bs_releaseNotesSeenVersion", "99.0.0")
+# Scenarios click card buttons at the Small card's coordinates.
+settings.setdefault("bs_overlayCardSize", "small")
 json.dump(settings, open(sys.argv[1], "w"))
 PY
     fi

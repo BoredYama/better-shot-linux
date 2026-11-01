@@ -353,7 +353,8 @@ so Enter captures it again.
 Save writes it to your save folder, Edit opens the editor, Pin keeps it on
 screen, and Dismiss closes it. Drag the card into another app to hand over the
 file, or double-click it to edit. Cards hide after a few seconds unless the
-pointer is over them.
+pointer is over them. Cards are Large by default; Settings › Cards › Card
+size offers Small and Medium.
 
 **In the editor**, the toolbar has Select, Rectangle, Solid rectangle, Circle,
 Line, Arrow, Freehand, Numbered circle, Text, Highlight (dims everything outside

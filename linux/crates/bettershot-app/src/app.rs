@@ -79,6 +79,13 @@ impl App {
         }
     }
 
+    /// Forgets a preference, reporting a failure rather than losing it silently.
+    pub fn clear_pref(&self, key: &str) {
+        if let Err(error) = self.state_mut().prefs.remove(key) {
+            eprintln!("bettershot: a setting could not be cleared: {error}");
+        }
+    }
+
     pub fn notify_error(&self, title: &str, body: &str) {
         eprintln!("bettershot: {title}: {body}");
         let notification = gio::Notification::new(title);

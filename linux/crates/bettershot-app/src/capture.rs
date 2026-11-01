@@ -30,6 +30,12 @@ thread_local! {
     /// whether one should be kept.
     static HELD_STREAM: RefCell<Option<Rc<ScreenStream>>> = const { RefCell::new(None) };
     static HOLDING_STREAM: Cell<bool> = const { Cell::new(false) };
+    /// Set when a held (scrolling) session has already given up on the
+    /// stream because the share did not cover the desktop, so later frames
+    /// in the same session use the portal instead of reopening the dialog.
+    static HOLD_USES_PORTAL: Cell<bool> = const { Cell::new(false) };
+    /// So the partial-share hint is shown at most once per run.
+    static WARNED_PARTIAL_SHARE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Starts `action`, or queues it behind the capture in progress.
@@ -230,27 +236,48 @@ async fn portal_frozen_screen(app: &App, layout: &Layout) -> Result<FrozenFrame,
 }
 
 async fn stream_frozen_screen(app: &App, layout: &Layout) -> Result<FrozenFrame, CaptureError> {
-    let held = HELD_STREAM.with(|held| held.borrow().clone());
-    let stream = match held {
-        Some(stream) => stream,
-        None => {
-            let token = app.with_prefs(|p| p.screen_share_restore_token());
-            let stream = Rc::new(ScreenStream::open(token.as_deref()).await?);
-            if let Some(token) = stream.restore_token() {
-                app.set_pref(app_prefs::keys::SCREEN_SHARE_RESTORE_TOKEN, token);
-            }
-            if HOLDING_STREAM.with(Cell::get) {
-                HELD_STREAM.with(|held| *held.borrow_mut() = Some(stream.clone()));
-            }
-            stream
-        }
-    };
-    let frames = stream.frames(FIRST_FRAME_TIMEOUT).map_err(CaptureError::Failed);
-    if !HOLDING_STREAM.with(Cell::get) {
-        stream.close().await;
+    // A scrolling session that already fell back keeps using the portal
+    // rather than reopening the share dialog for every frame.
+    if HOLD_USES_PORTAL.with(Cell::get) {
+        return Err(CaptureError::Failed("the shared screens do not cover the desktop".into()));
     }
     let monitors: Vec<Rect> = layout.monitors.iter().map(|(_, rect)| *rect).collect();
-    screen_stream::compose(&frames?, &monitors, layout.bounds).map_err(CaptureError::Failed)
+    let holding = HOLDING_STREAM.with(Cell::get);
+    if let Some(stream) = HELD_STREAM.with(|held| held.borrow().clone()) {
+        // The held stream was coverage-checked when it was opened.
+        let frames = stream.frames(FIRST_FRAME_TIMEOUT).map_err(CaptureError::Failed)?;
+        return screen_stream::compose(&frames, &monitors, layout.bounds).map_err(CaptureError::Failed);
+    }
+    let token = app.with_prefs(|p| p.screen_share_restore_token());
+    let stream = ScreenStream::open(token.as_deref()).await?;
+    let frames = stream.frames(FIRST_FRAME_TIMEOUT).map_err(CaptureError::Failed)?;
+    if !screen_stream::covers_all_monitors(frames.len(), monitors.len()) {
+        // Only some screens were shared, so the rest of the desktop would be
+        // blank. Forget the partial share so the dialog reappears next time,
+        // and let the caller fall back to the whole-desktop portal.
+        stream.close().await;
+        app.clear_pref(app_prefs::keys::SCREEN_SHARE_RESTORE_TOKEN);
+        if holding {
+            HOLD_USES_PORTAL.with(|flag| flag.set(true));
+        }
+        if !WARNED_PARTIAL_SHARE.with(|w| w.replace(true)) {
+            app.notify(
+                "Share all your screens",
+                "Only some screens were shared, so BetterShot captured the whole desktop another way. Choose every screen next time to capture silently.",
+            );
+        }
+        return Err(CaptureError::Failed("the shared screens do not cover the desktop".into()));
+    }
+    if let Some(token) = stream.restore_token() {
+        app.set_pref(app_prefs::keys::SCREEN_SHARE_RESTORE_TOKEN, token);
+    }
+    let frame = screen_stream::compose(&frames, &monitors, layout.bounds).map_err(CaptureError::Failed);
+    if holding {
+        HELD_STREAM.with(|held| *held.borrow_mut() = Some(Rc::new(stream)));
+    } else {
+        stream.close().await;
+    }
+    frame
 }
 
 /// Keeps the next screen stream open for repeated frames (a scrolling
@@ -267,6 +294,7 @@ fn stream_held() -> bool {
 
 async fn release_stream() {
     HOLDING_STREAM.with(|holding| holding.set(false));
+    HOLD_USES_PORTAL.with(|flag| flag.set(false));
     if let Some(stream) = HELD_STREAM.with(|held| held.borrow_mut().take()) {
         stream.close().await;
     }

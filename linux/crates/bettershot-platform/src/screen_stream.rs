@@ -221,6 +221,15 @@ fn image_from_sample(sample: &gst::Sample) -> Result<RgbaImage, String> {
 /// coordinates (`bounds` is the box around `monitors`), at the largest pixel
 /// scale among them. A stream without a reported placement takes the
 /// monitor with its logical size, or the whole desktop when it is alone.
+/// Whether the shared streams cover every monitor. GNOME, KDE, and wlroots
+/// each hand back one monitor stream per screen the user ticks, so a share
+/// that misses a monitor yields fewer streams than the desktop has. A
+/// capture built from it would leave the unshared monitors black, so the
+/// caller falls back to the whole-desktop screenshot path instead.
+pub fn covers_all_monitors(stream_count: usize, monitor_count: usize) -> bool {
+    stream_count > 0 && stream_count >= monitor_count
+}
+
 pub fn compose(frames: &[StreamFrame], monitors: &[Rect], bounds: Rect) -> Result<FrozenFrame, String> {
     if frames.is_empty() {
         return Err("No screen was shared.".into());
@@ -273,6 +282,15 @@ fn logical_rect(frame: &StreamFrame, monitors: &[Rect], bounds: Rect, count: usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_needs_a_stream_for_every_monitor() {
+        assert!(covers_all_monitors(1, 1), "a single-monitor desktop is covered by its one stream");
+        assert!(covers_all_monitors(2, 2), "both monitors shared");
+        assert!(covers_all_monitors(3, 2), "an extra stream still covers everything");
+        assert!(!covers_all_monitors(1, 2), "one of two monitors shared leaves the other blank");
+        assert!(!covers_all_monitors(0, 1), "no shared screen covers nothing");
+    }
 
     fn frame(x: i32, y: i32, w: i32, h: i32, pw: u32, ph: u32, color: [u8; 4]) -> StreamFrame {
         StreamFrame {

@@ -311,10 +311,15 @@ model.
   app's notifications only when its desktop entry is installed, so run
   `make install` (or install a package) rather than the binary from
   `target/`.
-- **The screen still flashes on GNOME:** your desktop declined screen sharing
-  or has no ScreenCast portal, so captures fell back to the screenshot
-  portal; the terminal says why. Check Settings › Capture › Read the screen
-  through screen sharing and allow the share when asked.
+- **The screen still flashes on GNOME:** your desktop declined screen sharing,
+  has no ScreenCast portal, or you shared only some of your screens, so
+  captures fell back to the screenshot portal; the terminal says why. Check
+  Settings › Capture › Read the screen through screen sharing, and when the
+  dialog asks, select every screen.
+- **Only one monitor appears, or another monitor is blank:** you shared a
+  single screen in the dialog. BetterShot now detects this and captures the
+  whole desktop instead, then asks again; select every screen to keep
+  captures silent.
 - **Global shortcuts do nothing:** the GlobalShortcuts portal needs GNOME
   48, Plasma 6, or Hyprland; elsewhere bind the commands in Settings ›
   Shortcuts through your desktop's keyboard settings.
@@ -433,10 +438,14 @@ directly from the X server on an X11 session (silent, no dialog). On
 Wayland they come from a screen-sharing stream (the ScreenCast portal) when
 Settings › Capture › Read the screen through screen sharing is on, which it
 is by default on GNOME, whose screenshot portal flashes the screen for every
-shot. The first time, your desktop asks which screens to share; choose all
-of them and it remembers the choice, and later captures are silent apart
-from the sharing indicator in the top bar for a moment. Turn the setting
-off to use the screenshot portal instead.
+shot. The first time, your desktop asks which screens to share. Select
+every screen: GNOME's dialog toggles each display on with a click, and a
+capture needs all of them to cover the whole desktop. BetterShot then
+remembers the choice, and later captures are silent apart from the sharing
+indicator in the top bar for a moment. If you share only some screens,
+BetterShot captures the whole desktop through the screenshot portal
+instead (with its flash), forgets that partial choice, and asks again next
+time. Turn the setting off to use the screenshot portal always.
 
 **Scrolling Capture** selects an area from a still frame, then opens a small
 session window. Scroll the content, choose **Add Frame** (or press Enter), and

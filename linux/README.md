@@ -5,15 +5,31 @@ Swift sources in `../Sources` remain the reference implementation; the
 [port plan](../docs/linux-port-plan.md) describes the stack, phases, and
 Wayland constraints.
 
-**Status:** Phase 6, screenshots, the image editor, capture extras, sharing,
-the library, screen recording, and the video studio. Capture an area, the
-screen, a window, the previous area, or a scrolling area; copy, save, drag,
-pin, share, or edit captures from the capture deck; annotate and frame them
-in the editor, with smart redaction of sensitive text; copy text from the
-screen with OCR; pick colors; share links through your own Cloudflare R2
-bucket; browse everything in the Media Gallery; record a display, window, or
-area with audio and a camera; and cut, frame, zoom, mask, and export
-recordings in the studio. 3D shots and packaging come in a later phase.
+**Status:** every phase of the port plan is delivered: screenshots, the
+image editor, capture extras, sharing, the library, screen recording, the
+video studio with 3D shots, the teleprompter, optional whisper.cpp
+subtitles, and packaging. Capture an area, the screen, a window,
+the previous area, or a scrolling area; copy, save, drag, pin, share, or edit
+captures from the capture deck; annotate and frame them in the editor, with
+smart redaction of sensitive text; copy text from the screen with OCR; pick
+colors; share links through your own Cloudflare R2 bucket; browse everything
+in the Media Gallery; record a display, window, or area with audio, a camera,
+and a teleprompter; and cut, frame, zoom, mask, restyle the cursor, caption,
+reframe, fly a 3D camera around, and export recordings in the studio.
+
+## Install a package
+
+From a checkout, `make -C linux deb` builds `linux/target/debian/bettershot_*.deb`
+(needs `cargo install cargo-deb`), `make -C linux appimage` assembles an AppDir
+and, with [appimagetool](https://github.com/AppImage/appimagetool) on your
+PATH, an AppImage in `linux/target/appimage/`, and `make -C linux flatpak`
+builds and installs the Flatpak for your user from
+`linux/packaging/flatpak/` (install the GNOME 48 SDK and the Rust extension
+first, and regenerate `cargo-sources.json` with flatpak-builder-tools when
+`Cargo.lock` changes). The `.deb` and the AppImage use your distribution's
+GTK, GStreamer, and Tesseract; the Flatpak carries GStreamer with OpenH264
+from the runtime and cannot reach a host Tesseract, so Capture Text is
+unavailable there until it is bundled.
 
 ## Install from source
 
@@ -48,6 +64,13 @@ make install          # installs to /usr/local; use PREFIX=... to change it
 ```
 
 Then open BetterShot from your app menu. `make uninstall` removes it.
+
+**Teleprompter.** The capture bar's Script button opens a small window: paste
+or type what you want to say, turn on Show while recording, and choose how
+many lines show. While a recording runs, the prompter hangs near the top of
+the screen; scroll it a line at a time with the mouse wheel, the arrow or
+Page keys, or its arrow buttons. macOS follows your voice; Linux has no
+speech engine, so the prompter moves only when you scroll it.
 
 ## Using it
 
@@ -181,18 +204,38 @@ that a crash leaves them playable; the next launch recovers interrupted ones.
 double-click), the Media Gallery's Edit, `bettershot edit <project>`, or
 automatically after recording with Settings › General › Open the editor. The
 inspector on the left has Background (the gradients and colors, padding,
-corner radius, and shadow; new recordings start from General › Default Look),
+corner radius, and shadow; new recordings start from General › Default Look;
+the Presets menu applies, saves, and deletes named looks),
 Cursor (on recordings made in an X11 session: show, Recorded, Arrow, Dark,
 Light, or Dot styles, size, smooth motion, click effects with press and
 ripple, and hiding when idle; Wayland recordings keep the cursor in the
 picture), Camera (show, the
 Bubble, Overlap, Side-by-Side, Presenter, Camera Only, and Screen Only
-layouts, side, size, roundness, and frame ratio), Effects (a crop and blur or
-pixelate masks, each with an area, strength, and time range), Zoom & Clips
+layouts, side, size, roundness, and frame ratio; in the Bubble layout, drag
+the bubble on the preview), Effects (Adjust Crop shows the whole recording
+with handles to drag, Return applies and Escape cancels; blur or pixelate
+masks, each with an area you drag by its handles on the preview, a strength,
+and a time range; keystroke captions for the shortcuts recorded on X11, with
+their placement; and the subtitle bar for projects that carry cues from the
+macOS app's transcription or from Transcribe, which runs whisper.cpp on the
+narration when the `whisper-cli` command and a model chosen in Settings ›
+Recording are installed, with its position, text size, and spoken-word
+highlight; and 3D Shots: Add Shot places a three-second shot at the playhead
+with one of Cap's thirteen camera moves, Auto Scene lays out Cap's
+automatic sequence, and each shot has its move, start, end, transition,
+easing, Reverse, and a depth blur with radial, directional, or tilt-shift
+focus, falloff, and bokeh; D adds a shot, C adjusts the crop, B and P add
+masks), Zoom & Clips
 (zooms at the playhead with magnification, focus, and how they follow;
 Scissors, Delete Clip, Reset Clips, and the selected clip's speed), and Export
-(MP4 or MOV, 30 or 60 fps, quality, resolution, audio). The preview draws
-exactly what exports do; Space plays it (without sound), Left and Right step
+(the aspect ratio, from the original to 16:9, 16:10, 4:3, 9:16, 1:1, and 4:5,
+with Fill cropping into the recording along a camera that follows your
+cursor and zooms, or Fit framing the whole recording on the background; MP4
+or MOV, 30 or 60 fps, quality, resolution, audio). A crop sets the output
+size, as on macOS. Exports blur the picture while a zoom or reframe camera
+moves, sampling the frame up to 4, 12, or 24 times at the Fast, Medium, and
+Slow encoder speeds. The preview draws
+exactly what exports do; Space plays it with the recording's sound, Left and Right step
 a frame, and Shift steps a second. On the timeline, click to seek and select
 a clip, click with Scissors (S) to cut, and read the removed time under each
 cut. Ctrl+Z and Ctrl+Shift+Z undo and redo; drafts save as you work, and
@@ -229,12 +272,14 @@ for example `bettershot capture region`.
   sessions hide the system cursor and sample the pointer, buttons, and
   keyboard chords (never plain typing) into `input.json` instead; a card's
   Save then renders the recording with the default look, as macOS does.
-- **The studio preview is silent** and plays by stepping frames; audio is
-  only in the exported file. There is no motion blur during zooms, crop and
-  mask areas are set with sliders rather than handles, the camera bubble is
-  placed by its layout and sliders, and keystroke captions, subtitles,
-  reframe presets, style presets, and 3D shots from macOS projects are kept
-  but not shown.
+- **The studio preview plays by stepping frames** without motion blur; the
+  blur is in the exported file. Transcription needs whisper.cpp installed
+  separately and runs on the CPU, and there is no subtitle editor yet.
+- **3D shots render on the CPU.** The perspective warp and depth blur run
+  on every core without a GPU, so the preview shows them at half
+  resolution and an export with shots takes a few times longer than one
+  without. Keyframe tracks and the orbit pad from macOS projects play back
+  but are edited with the sliders only.
 - **Area recordings** are cropped from the display your desktop's dialog
   shares. Pick the display that holds the area; if it does not, the whole
   display is recorded.

@@ -3,6 +3,7 @@
 //! rects are in canvas pixels with a top-left origin.
 
 use super::edit::{LayoutPreset, StudioStyle};
+use super::shots3d::{Pose3D, Projection};
 use super::viewport::ViewportFrame;
 use crate::geometry::Rect;
 
@@ -144,6 +145,17 @@ impl StudioLayout {
             bubble_corner_radius,
             content_fill_size,
         }
+    }
+
+    /// `camera3DProjection`: the 3D pose's projection with the zoom
+    /// magnifying the whole plane about the viewport's anchor.
+    pub fn camera_3d_projection(&self, pose: &Pose3D, viewport: ViewportFrame) -> Projection {
+        let neutral = self.frame_rect(ViewportFrame::IDENTITY);
+        let target = (
+            (neutral.x + viewport.anchor.x * neutral.width) / self.canvas_size.0,
+            (neutral.y + viewport.anchor.y * neutral.height) / self.canvas_size.1,
+        );
+        pose.projection_zoomed(self.canvas_size, viewport.magnification, target)
     }
 
     /// Where the (zoomed) screen video draws: it fills the card at

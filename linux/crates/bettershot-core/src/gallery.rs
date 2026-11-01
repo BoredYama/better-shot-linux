@@ -92,6 +92,39 @@ pub fn collect(history: &HistoryStore) -> Vec<GalleryItem> {
     items
 }
 
+/// Port of the Projects half of `MediaGalleryItem.collect`: recording
+/// packages on disk that the library does not list yet (recovered or copied
+/// in) join the gallery as recordings, deletable as a whole.
+pub fn collect_with_projects(
+    history: &HistoryStore,
+    store: &crate::recording::RecordingSessionStore,
+) -> Vec<GalleryItem> {
+    let mut items = collect(history);
+    let represented: std::collections::HashSet<PathBuf> = items
+        .iter()
+        .filter_map(|item| crate::recording::RecordingSession::containing(&item.capture).map(|s| s.directory))
+        .collect();
+    for session in store.all_sessions() {
+        if represented.contains(&session.directory) {
+            continue;
+        }
+        let Some(manifest) = session.load_capture_manifest() else { continue };
+        let metadata = session.load_project_metadata();
+        items.push(GalleryItem {
+            id: Uuid::new_v4(),
+            title: metadata.and_then(|m| m.display_name).unwrap_or_else(|| session.display_name()),
+            created_at: manifest.created_at,
+            kind: CaptureKind::Recording,
+            preview: session.poster_path(),
+            capture: session.screen_path(),
+            cloud_url: None,
+            deletion_paths: vec![session.directory.clone()],
+        });
+    }
+    items.sort_by_key(|item| std::cmp::Reverse(item.created_at));
+    items
+}
+
 /// Port of `MediaGalleryItem.filtered`: one location (local files or cloud
 /// links), an optional kind, and a case-insensitive name search.
 pub fn filtered(items: &[GalleryItem], kind: Option<CaptureKind>, cloud: bool, search: &str) -> Vec<GalleryItem> {

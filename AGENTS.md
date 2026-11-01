@@ -188,6 +188,31 @@ a PR unless explicitly requested.
 - Do not modify unrelated work, commit local signing identities, publish releases,
   or remove installed apps/user data as a side effect of routine editing.
 
+## Linux port
+
+- `linux/` is a Rust workspace (GTK 4, libadwaita, GStreamer, ashpd portals)
+  that ports the Swift app module by module; each Rust module names the Swift
+  file it ports in its header. Keep file formats shared with macOS (history,
+  `.bettershot` sidecars, `.bettershotrec` packages and `edit.json`, share
+  manifests, `bs_*` preference keys) byte-compatible; the core tests rewrite
+  macOS fixtures to prove it.
+- Use Adwaita symbolic icons, not SF Symbols (their license does not allow use
+  on Linux), and the bundled clover identity for the app icon and tray. Keep
+  the same UI structure as macOS: inspectors on the left, the shared capture
+  bar at 64/38 px, the Background, Cursor, Camera, Effects, Zoom & Clips, and
+  Export sections, native GTK dialogs for destructive actions.
+- The preview and every export draw through `bettershot-render`; never add a
+  second drawing path. Portals, PipeWire, X11 sampling, and the keyring live
+  in `bettershot-platform`.
+- Verify with `make -C linux check` (format, clippy with warnings as errors,
+  tests under `BETTERSHOT_TESTING=1`) and `make -C linux check-ui` (the real
+  app under Xvfb in light and dark). Report what the headless checks cannot
+  prove: real portals, PipeWire, PulseAudio, cameras, the tray, Wayland
+  placement, and audio output.
+- Record user-facing changes under `## [Unreleased]` in `linux/CHANGELOG.md`,
+  and keep `linux/README.md`, `docs/linux-port-plan.md`, and
+  `HANDOFF.better-shot.md` current.
+
 ## Website-only rules
 
 - Landing-page-only changes must not update or create README files or changelog

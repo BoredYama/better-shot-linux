@@ -124,6 +124,13 @@ macOS changelog, and that file is what the Linux app's What's New shows. When yo
 `bettershot-core` module ports, such as file naming or share links, update the
 module named in its header comment too.
 
+Linux packages come from `linux/Makefile`: `make -C linux deb` builds a Debian
+package with `cargo-deb`, `make -C linux appimage` assembles an AppDir and, with
+`appimagetool` available, an AppImage, and `make -C linux flatpak` builds the
+Flatpak from `linux/packaging/flatpak/` (regenerate its `cargo-sources.json`
+with flatpak-builder-tools whenever `linux/Cargo.lock` changes). The Linux
+rules for agents are in [AGENTS.md](AGENTS.md#linux-port).
+
 ## Code map
 
 | Location | Start here for |

@@ -29,6 +29,7 @@ pub mod share;
 pub mod shortcuts;
 pub mod swift_codable;
 pub mod swift_date;
+pub mod teleprompter;
 pub mod text_recognition;
 pub mod transfer;
 pub mod url_action;

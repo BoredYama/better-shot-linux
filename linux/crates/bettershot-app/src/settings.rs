@@ -73,7 +73,7 @@ fn build(app: &App) -> adw::PreferencesWindow {
         .build();
     window.add(&general_page(app, &window));
     window.add(&capture_page(app));
-    window.add(&recording_page(app));
+    window.add(&recording_page(app, &window));
     window.add(&deck_page(app));
     window.add(&shortcuts_page(app));
     window.add(&sharing_page(app, &window));
@@ -364,7 +364,7 @@ fn capture_page(app: &App) -> adw::PreferencesPage {
 
 // MARK: - Recording
 
-fn recording_page(app: &App) -> adw::PreferencesPage {
+fn recording_page(app: &App, window: &adw::PreferencesWindow) -> adw::PreferencesPage {
     use bettershot_core::after_capture::{self, AfterCaptureAction, CaptureType};
     use bettershot_core::app_prefs::RECORDING_FRAME_RATE_CHOICES;
     use bettershot_platform::devices;
@@ -411,6 +411,35 @@ fn recording_page(app: &App) -> adw::PreferencesPage {
             }
         },
     ));
+    // Narration subtitles need whisper.cpp and a model the user downloads.
+    let model_row = adw::ActionRow::builder().title("Whisper model").subtitle_selectable(true).build();
+    let describe = |row: &adw::ActionRow| {
+        let chosen = App::get().with_prefs(|p| p.whisper_model_path());
+        match bettershot_platform::transcription::availability(chosen.as_deref()) {
+            Ok((_, model)) => row.set_subtitle(&format!("Subtitles use {}", model.to_string_lossy())),
+            Err(reason) => row.set_subtitle(&format!("{reason} Models are ggml-*.bin files from whisper.cpp.")),
+        }
+    };
+    describe(&model_row);
+    let choose_model = gtk::Button::builder().label("Choose…").valign(gtk::Align::Center).build();
+    choose_model.update_property(&[gtk::accessible::Property::Label("Choose a whisper model")]);
+    let row = model_row.clone();
+    let parent = window.clone();
+    choose_model.connect_clicked(move |_| {
+        let row = row.clone();
+        let parent = parent.clone();
+        glib::spawn_future_local(async move {
+            let dialog = gtk::FileDialog::builder().title("Choose a whisper.cpp Model").modal(true).build();
+            if let Ok(file) = dialog.open_future(Some(&parent)).await {
+                if let Some(path) = file.path() {
+                    App::get().set_pref(keys::WHISPER_MODEL_PATH, path.to_string_lossy().as_ref());
+                    describe(&row);
+                }
+            }
+        });
+    });
+    model_row.add_suffix(&choose_model);
+    recording.add(&model_row);
     page.add(&recording);
 
     let inputs = group(

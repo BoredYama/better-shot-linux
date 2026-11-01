@@ -321,7 +321,12 @@ fn build(app: &App) -> Rc<Gallery> {
 
 fn refresh(gallery: &Rc<Gallery>) {
     let category = gallery.category.get();
-    let all = gallery::collect(&App::get().state().history);
+    let all = {
+        let app = App::get();
+        let state = app.state();
+        let store = bettershot_core::recording::RecordingSessionStore::new(state.dirs.recordings());
+        gallery::collect_with_projects(&state.history, &store)
+    };
     let mut items = gallery::filtered(&all, category.kind, category.cloud, &gallery.search.text());
     gallery.sort.get().sort(&mut items);
     gallery.title.set_title(category.title());

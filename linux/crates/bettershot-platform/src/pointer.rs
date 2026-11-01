@@ -112,13 +112,19 @@ impl PointerSampler {
         }
     }
 
-    /// Stops sampling and returns the sidecar for a movie `duration` seconds
-    /// long: later samples are dropped, as `PointerActivityRecorder.finish` does.
-    pub fn finish(mut self, duration: f64) -> PointerCaptureFile {
+    /// Stops sampling now (the recording stopped); `finish` reads the result
+    /// once the movie's duration is known.
+    pub fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+
+    /// Stops sampling and returns the sidecar for a movie `duration` seconds
+    /// long: later samples are dropped, as `PointerActivityRecorder.finish` does.
+    pub fn finish(mut self, duration: f64) -> PointerCaptureFile {
+        self.stop();
         let shared = std::mem::take(&mut *self.shared.lock().unwrap_or_else(|e| e.into_inner()));
         let keep = |time: f64| time >= 0.0 && time <= duration + 0.5;
         PointerCaptureFile {

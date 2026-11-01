@@ -19,6 +19,12 @@ thread_local! {
     };
 }
 
+/// A fresh layout on the shared context, for callers that set their own
+/// attributes (the studio's captions).
+pub fn new_layout() -> pango::Layout {
+    CONTEXT.with(pango::Layout::new)
+}
+
 /// A font description in pixels.
 pub fn font(family: FontFamily, size: f64, bold: bool, italic: bool) -> pango::FontDescription {
     let mut description = pango::FontDescription::new();

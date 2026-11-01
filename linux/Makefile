@@ -1,7 +1,7 @@
 # BetterShot for Linux. Run from linux/ (or `make -C linux <target>`).
 SHELL := /bin/bash -o pipefail
 
-.PHONY: help check check-ui fmt lint test build release clean install uninstall run
+.PHONY: help check check-ui fmt lint test build release clean install uninstall run deb appimage flatpak
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -60,6 +60,15 @@ install: release ## Install to $(PREFIX) (default /usr/local)
 		gtk-update-icon-cache -qtf $(PREFIX)/share/icons/hicolor || true; \
 		update-desktop-database -q $(PREFIX)/share/applications || true; \
 	fi
+
+deb: ## Build a Debian package into target/debian (needs `cargo install cargo-deb`)
+	cargo deb -p bettershot-app
+
+appimage: release ## Build an AppImage into target/appimage (needs appimagetool on PATH or APPIMAGETOOL set)
+	bash packaging/appimage/build.sh
+
+flatpak: ## Build and install the Flatpak for the current user (needs flatpak-builder and the GNOME SDK)
+	flatpak-builder --user --install --force-clean target/flatpak-build packaging/flatpak/$(APP_ID).yml
 
 uninstall: ## Remove an installation from $(PREFIX)
 	rm -f $(DESTDIR)$(PREFIX)/bin/bettershot

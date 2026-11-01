@@ -13,6 +13,7 @@ pub mod blur;
 pub mod freehand;
 pub mod geometry;
 pub mod path;
+pub mod shots3d;
 pub mod studio;
 pub mod surface;
 pub mod text;

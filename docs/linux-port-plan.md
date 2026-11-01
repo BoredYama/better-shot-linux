@@ -1,7 +1,9 @@
 # BetterShot for Linux: port plan
 
 Status: Phases 0–6 complete (core, CI, screenshot app, image editor, capture
-extras, sharing and library, screen recording, video editor). Phase 7 is next.
+extras, sharing and library, screen recording, video editor) and the studio
+follow-ups are complete, and Phase 7 (packaging, the teleprompter, whisper
+subtitles, 3D shots) is delivered.
 
 ## What is being ported
 
@@ -367,13 +369,34 @@ building it:
 - Save commits `edit.json`, drops the draft, renders the flattened
   deliverable into the package (`<base>.mp4`, stamped by `render.json`)
   unless the recording is untouched, and writes or replaces the saved file;
-  Export As writes a new file the user chose. Motion-blur supersampling is
-  not implemented, so each output frame samples one source frame.
-- The preview is silent: it steps the playhead with a timer and composites
-  frames; audio playback waits for a GStreamer playback path.
-- Crop and mask areas are set with numeric sliders in the inspector rather
-  than handles on the preview, and the camera bubble is placed by the layout
-  presets and its sliders, not by dragging.
+  Export As writes a new file the user chose. The exporter averages the
+  viewport at up to `motionBlurSamples` (4/12/24 by encoder speed) sample
+  times across each output frame while the content rect moves
+  (`blurSampleCount`), accumulating the screen layer additively in a cairo
+  group; the preview samples once.
+- `ReframeTrack` (`core::recording::reframe`) is a line-for-line port:
+  Export › Aspect ratio with Fill builds the crop-and-follow camera from the
+  pointer timeline (or a plain pointer timeline when the cursor is in the
+  pixels) on top of the cropped zoom viewport; Fit lets the layout fit the
+  cropped source's aspect into the card. The output canvas is the cropped
+  source size (`croppedVideoSize`) or the preset's canvas for it.
+- The preview steps the playhead with a timer and composites frames; a
+  GStreamer `AudioPlayer` (the mixed tracks through `autoaudiosink`, a
+  fake sink under testing) is seeked to each clip's source time at the
+  clip's speed, so sound follows cuts and speed changes.
+- Keystroke captions and the subtitle bar (`core::recording::captions`:
+  the caption timeline, subtitle and karaoke timelines, and both metrics)
+  draw in the compositor through Pango at each frame's source time, with
+  the chords the X11 sampler recorded and the cues macOS transcription
+  wrote; style presets (`core::recording::style_presets`) keep the macOS
+  library key in the preferences; packages the library does not list join
+  the Media Gallery (`gallery::collect_with_projects`).
+- Crop and mask areas have handles on the preview (the same `region`
+  geometry as the image editor's crop), the Bubble layout's camera is
+  dragged by its center, and the inspector's sliders stay for keyboard use.
+  Adjust Crop shows the whole, unzoomed source so the handles stay in source
+  coordinates, as the macOS flat player does; cancelling restores the crop
+  that was applied before and drops that undo step.
 - The pointer timeline (`core::recording::pointer`) is a line-for-line
   port of the sanitizer, springs, press intervals, and clip remapping; the
   compositor draws the cursor and the press pulse through the content
@@ -382,17 +405,63 @@ building it:
   are drawn as cairo vectors, so a project styled on one platform renders
   the same on the other. A card's Save flattens a synthesized-pointer
   recording with the default look first (`ensure_deliverable`).
-- Not yet: keystroke captions, subtitles and transcription, the reframe
-  presets' UI (documents from macOS keep and apply them), style presets,
-  the Projects browser, and 3D shots (Phase 7).
+- Not yet: transcription (Phase 7's optional whisper.cpp), a subtitle
+  editor, and 3D shots (Phase 7).
 
-### Phase 7: Advanced and distribution
-- 3D shots on `wgpu`, verified against `Cap3DReference.json`/`Cap3DScenes.json`.
-  The adapted Cap code keeps its AGPLv3 attribution.
-- Teleprompter; optional whisper.cpp subtitles.
-- Flatpak (primary, on Flathub), AppImage, and `.deb`. Linux docs in README and
-  CONTRIBUTING, a Linux section in AGENTS.md (Adwaita icons instead of SF
-  Symbols), and changelog entries.
+### Phase 7: Advanced and distribution (in progress)
+- 3D shots, verified against `Cap3DReference.json`/`Cap3DScenes.json`.
+  The adapted Cap code keeps its AGPLv3 attribution. (Done, on the CPU
+  rather than `wgpu`; see below.)
+- Teleprompter (done); optional whisper.cpp subtitles (done).
+- Flatpak (primary, on Flathub), AppImage, and `.deb` (done). Linux docs in
+  README and CONTRIBUTING, a Linux section in AGENTS.md (Adwaita icons
+  instead of SF Symbols), and changelog entries (done).
+
+Delivered so far:
+
+- Packaging: `cargo-deb` metadata in `crates/bettershot-app/Cargo.toml`
+  (`make deb`, verified here: the package carries the binary, desktop file,
+  metainfo, icons, onboarding art, and the MacShot and Cap notices);
+  `packaging/appimage/build.sh` (`make appimage`: assembles the AppDir
+  through `make install`, then runs `appimagetool` when present; only the
+  AppDir was verified here, since GitHub downloads are blocked in this
+  environment); `packaging/flatpak/site.bettershot.BetterShot.yml`
+  (`make flatpak`: GNOME 48 runtime, Rust SDK extension, OpenH264 extension
+  for H.264, offline cargo sources from flatpak-builder-tools; not built
+  here, no `flatpak-builder`). The Flatpak cannot reach a host Tesseract, so
+  Capture Text needs Tesseract bundled as a module before a Flathub submission.
+- 3D shots: `core::recording::shots3d` (AGPL header) ports the pose and
+  pinhole camera, projection (with the zoom folded in), easing, depth-blur
+  settings, keyframe tracks with Bézier easing, presets, scenes, and the
+  timeline; its tests consume both Cap fixtures (248 camera/zoom/transition
+  cases and 138 scenes) exactly as `Tests/Recording3DCheck.swift` does.
+  `render::shots3d` ports the Metal kernels to the CPU (inverse warp with
+  horizon clipping and edge anti-aliasing, separable Gaussian and
+  three-ring bokeh) on all cores, blurring large canvases at half
+  resolution with the focus kept sharp; the compositor fades the card
+  shadow by shot activity, warps the flat layers over the plain
+  background, and blurs the result before the captions. The preview runs
+  the pass at half resolution. Decision: no `wgpu` dependency; a 1280×800
+  frame costs about a quarter second here, so exports with shots are
+  slower than on macOS but deterministic and testable headless. The
+  keyframe editor and orbit pad are not ported (sliders cover the values;
+  macOS tracks play back).
+- Subtitles: `core::recording::transcription` ports `makeCues` (42
+  characters, 4 s, 0.9 s pauses, 0.8 s minimum) and parses whisper.cpp's
+  JSON (token timings merged into words at their leading spaces; plain
+  segments spread evenly); `platform::transcription` mixes the tracks to a
+  16 kHz mono WAV with GStreamer and runs `whisper-cli` with the model from
+  `BETTERSHOT_WHISPER_MODEL`, Settings › Recording, or the usual model
+  folders. The transcript is undoable project state (`subtitleCues`,
+  `subtitleWords`). Nothing is bundled and no run was possible here (no
+  whisper.cpp in the container); the parser is covered by tests.
+- Teleprompter: `core::teleprompter` ports the script text model (display
+  words, the greedy matcher with its lookahead, the line layout with a
+  measuring closure, and the top-line rule); the app's `teleprompter.rs`
+  has the composer (Script button on the bar, macOS preference keys) and the
+  prompter window shown for the recording. Linux has no speech engine, so
+  the prompter scrolls by wheel, keys, or buttons instead of following the
+  voice; the matcher is ready for a recognizer.
 
 ## Verification
 

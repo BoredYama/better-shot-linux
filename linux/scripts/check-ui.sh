@@ -592,13 +592,13 @@ PY
       # Step to the click (about 1.2 s in): the pulse and the recorded cursor show.
       xdotool key --repeat 38 --delay 15 Right; sleep 0.8
       shot "$SCENARIO-$APPEARANCE-2-recorded-cursor"
-      # Style › Arrow through the dropdown.
-      click_at $((sx + 190)) $((sy + 600)); sleep 0.6
+      # Style › Arrow through the dropdown (below the preset bar).
+      click_at $((sx + 190)) $((sy + 642)); sleep 0.6
       shot "$SCENARIO-$APPEARANCE-3-styles"
       xdotool key Down; sleep 0.2; xdotool key Return; sleep 0.8
       shot "$SCENARIO-$APPEARANCE-4-arrow"
       # Click effects off hides the pulse; undo brings it back.
-      click_at $((sx + 220)) $((sy + 742)); sleep 0.5
+      click_at $((sx + 220)) $((sy + 784)); sleep 0.5
       xdotool key ctrl+z; sleep 0.5
       xdotool key ctrl+s; sleep 14
       python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the cursor style"
@@ -608,6 +608,200 @@ print(d["style"].get("cursor"), d.get("showsClickEffects"), file=sys.stderr)
 sys.exit(0 if d["style"]["cursor"]["appearance"] == "macOS" and d["showsClickEffects"] is True and d["formatVersion"] == 8 else 1)
 PY
       [[ -n "$(find "$package" -maxdepth 1 -name '*.mp4' | head -1)" ]] || fail "Save did not render the deliverable"
+      [[ $(saved_files | wc -l) -eq 1 ]] || fail "Save wrote $(saved_files | wc -l) files"
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
+      ;;
+    handles)
+      # A recording with a camera: drag the bubble, a mask's handle, and the
+      # crop on the preview; Save keeps all three.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 2
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" && -f "$package/camera.mov" ]] || fail "no recording package with a camera"
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-2-camera"
+      # The canvas draws at (293, 63) scaled 0.711 with no background, so the
+      # bubble at (0.85, 0.82) sits near (1067, 529); drag it to the lower left.
+      drag_to 1067 529 500 500
+      shot "$SCENARIO-$APPEARANCE-3-bubble-moved"
+      # C adjusts the crop: drag its top-left handle inward and apply with Return.
+      xdotool key c; sleep 0.6
+      shot "$SCENARIO-$APPEARANCE-5-crop-editing"
+      drag_to 295 65 393 163
+      xdotool key Return; sleep 0.8
+      shot "$SCENARIO-$APPEARANCE-6-crop-applied"
+      # B adds a blur mask; widen it by its bottom-right handle (the mask
+      # sits in cropped source space, drawn through the crop).
+      xdotool key b; sleep 0.8
+      shot "$SCENARIO-$APPEARANCE-7-mask"
+      # The mask lives in source space, so the crop moves it: its default
+      # rect now spans (516, 169)-(873, 409) on screen.
+      drag_to 873 409 960 480
+      shot "$SCENARIO-$APPEARANCE-8-mask-resized"
+      xdotool key ctrl+s
+      # The render has a camera, a blur, and a crop: wait for the saved file.
+      for _ in $(seq 1 120); do [[ $(saved_files | wc -l) -ge 1 ]] && break; sleep 1; done; sleep 2
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the dragged bubble, mask, or crop"
+import json, sys
+d = json.load(open(sys.argv[1]))
+style, masks, crop = d["style"], d.get("masks", []), d.get("crop")
+print(style["cameraCenterX"], style["cameraCenterY"], masks and (masks[0]["width"], masks[0]["height"]), crop, file=sys.stderr)
+ok = abs(style["cameraCenterX"] - 0.227) < 0.03 and abs(style["cameraCenterY"] - 0.768) < 0.03
+ok = ok and len(masks) == 1 and 0.4 < masks[0]["width"] < 0.5 and 0.4 < masks[0]["height"] < 0.5
+ok = ok and crop is not None and abs(crop[0] - 0.11) < 0.03 and abs(crop[1] - 0.176) < 0.03 and abs(crop[2] - 0.89) < 0.03
+sys.exit(0 if ok else 1)
+PY
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
+      ;;
+    reframe)
+      # Export › Aspect ratio 9:16 renders a vertical video that follows the
+      # pointer; Save writes the project's exportAspect and a 450×800 file.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 1.5
+      xdotool mousemove 200 300; sleep 0.4; xdotool mousemove 1100 600; sleep 0.8
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" ]] || fail "no recording package"
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      xdotool mousemove 6 400 click --repeat 25 --delay 60 5; sleep 0.6
+      shot "$SCENARIO-$APPEARANCE-2-export"
+      # Aspect ratio › 9:16 (the fifth entry) through the dropdown.
+      click_at 202 563; sleep 0.6
+      xdotool key Down Down Down Down; sleep 0.3; xdotool key Return; sleep 1
+      shot "$SCENARIO-$APPEARANCE-3-vertical"
+      xdotool key ctrl+s
+      for _ in $(seq 1 120); do [[ $(saved_files | wc -l) -ge 1 ]] && break; sleep 1; done; sleep 2
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the reframe"
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get("exportAspect"), d.get("exportAspectMode"), file=sys.stderr)
+sys.exit(0 if d.get("exportAspect") == "vertical9x16" and d.get("exportAspectMode") == "fill" else 1)
+PY
+      local probe; probe="$(gst-discoverer-1.0 "$(saved_files)" 2>/dev/null || true)"
+      [[ "$probe" == *"Width: 450"* && "$probe" == *"Height: 800"* ]] || fail "the reframed video is not 450x800: $probe"
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
+      ;;
+    captions)
+      # A chord pressed while recording becomes a keystroke caption; subtitle
+      # cues written into the project (as macOS transcription would) draw as
+      # the bar; a style preset saves the current look.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 1.5
+      xdotool keydown ctrl+shift+s; sleep 0.3; xdotool keyup ctrl+shift+s; sleep 1.5
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" ]] || fail "no recording package"
+      python3 - "$package/input.json" "$package/edit.json" "$package/capture.json" <<'PY' || fail "the chord was not recorded"
+import json, sys
+p = json.load(open(sys.argv[1]))
+print(json.load(open(sys.argv[3]))["duration"], p["keystrokes"], file=sys.stderr)
+chords = [k for k in p["keystrokes"] if k["key"] == "S" and "Ctrl" in k["modifiers"] and "Shift" in k["modifiers"]]
+if not chords:
+    sys.exit(1)
+# Subtitles as the macOS app's transcription writes them, timed to the chord.
+t = chords[0]["time"]
+doc = {"formatVersion": 8, "style": {"background": {"none": {}}, "padding": 0.08, "cornerRadius": 0.018, "shadow": 0.36,
+       "cameraIsVisible": True, "cameraCenterX": 0.85, "cameraCenterY": 0.82, "cameraSize": 0.26, "cameraRoundness": 0.25},
+       "zoomEnabled": True, "zoomCues": [], "trimStart": 0, "trimEnd": 99,
+       "subtitleCues": [{"id": "0B5B8D2E-9D1B-4C4A-9F9B-0B0B0B0B0B01", "start": 0.0, "end": 99.0, "text": "hello from the subtitle bar"}],
+       "subtitleWords": [{"text": "hello", "start": 0.0, "end": 0.4}, {"text": "from", "start": 0.5, "end": 0.8},
+                         {"text": "the", "start": 0.9, "end": 1.1}, {"text": "subtitle", "start": 1.2, "end": 1.8}, {"text": "bar", "start": 1.9, "end": 2.4}],
+       "subtitleWordHighlight": True}
+json.dump(doc, open(sys.argv[2], "w"))
+open(sys.argv[2] + ".frames", "w").write(str(int(round(t * 30)) + 6))
+PY
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      # Step onto the chord so its caption shows with the subtitle bar.
+      xdotool key --repeat "$(cat "$package/edit.json.frames")" --delay 15 Right; sleep 0.8
+      rm -f "$package/edit.json.frames"
+      shot "$SCENARIO-$APPEARANCE-2-captions"
+      # Save the look as a preset named "Plain" from the Background section.
+      click_at 232 541; sleep 0.6
+      xdotool type --delay 40 "Plain"; sleep 0.2; xdotool key Return; sleep 0.8
+      shot "$SCENARIO-$APPEARANCE-3-preset"
+      python3 - "$BETTERSHOT_TEST_ROOT/config/settings.json" <<'PY' || fail "the preset was not saved"
+import json, sys
+s = json.load(open(sys.argv[1]))
+lib = s.get("recordingStudioStylePresetLibrary.v1")
+print(lib and [p["name"] for p in lib["presets"]], file=sys.stderr)
+sys.exit(0 if lib and [p["name"] for p in lib["presets"]] == ["Plain"] and lib.get("activePresetID") else 1)
+PY
+      xdotool key space; sleep 1.0; xdotool key space; sleep 0.5
+      xdotool key ctrl+s
+      for _ in $(seq 1 120); do [[ $(saved_files | wc -l) -ge 1 ]] && break; sleep 1; done; sleep 2
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lost its captions"
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get("showsKeystrokes"), d.get("keystrokePlacement"), d.get("showsSubtitles"), len(d.get("subtitleCues", [])), d.get("subtitleWordHighlight"), file=sys.stderr)
+sys.exit(0 if d["showsKeystrokes"] is True and d["keystrokePlacement"] == "bottomCenter" and d["showsSubtitles"] is True and len(d["subtitleCues"]) == 1 and d["subtitleWordHighlight"] is True else 1)
+PY
+      xdotool key ctrl+w; sleep 1
+      [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
+      ;;
+    teleprompter)
+      # The prompter shows the script while recording and scrolls a line at
+      # a time; the bar's Script button opens the composer.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 1.5
+      local prompter; prompter="$(window_titled 'Prompter')"
+      [[ -n "$prompter" ]] || fail "the prompter did not appear while recording"
+      shot "$SCENARIO-$APPEARANCE-2-prompter"
+      eval "$(xdotool getwindowgeometry --shell "$prompter")"
+      xdotool mousemove $((X + WIDTH / 2)) $((Y + HEIGHT / 2)); sleep 0.3; xdotool click 5; sleep 0.5
+      shot "$SCENARIO-$APPEARANCE-3-scrolled"
+      "$BIN" record stop; sleep 4
+      [[ -z "$(window_titled 'Prompter')" ]] || fail "the prompter stayed after the recording"
+      "$BIN" record; sleep 1.5
+      local bar; bar="$(window_titled 'Capture Bar')"
+      [[ -n "$bar" ]] || fail "the capture bar did not open"
+      eval "$(xdotool getwindowgeometry --shell "$bar")"
+      shot "$SCENARIO-$APPEARANCE-4-bar"
+      click_at $((X + 800)) $((Y + 32))
+      [[ -n "$(window_titled 'Teleprompter')" ]] || fail "the Script button did not open the composer"
+      shot "$SCENARIO-$APPEARANCE-5-composer"
+      xdotool key Escape; sleep 0.6
+      [[ -z "$(window_titled 'Teleprompter')" ]] || fail "Escape did not close the composer"
+      ;;
+    shots3d)
+      # D adds a three-second Glide shot at the playhead: the preview warps
+      # the card in perspective and Save keeps the shot as macOS encodes it.
+      "$BIN" record display; sleep 1
+      for _ in $(seq 1 20); do [[ -n "$(window_titled 'Capture Bar')" ]] && break; sleep 0.25; done; sleep 2.5
+      "$BIN" record stop; sleep 4
+      local package; package="$(find "$BETTERSHOT_TEST_ROOT/data/Recordings" -maxdepth 1 -name '*.bettershotrec' | head -1)"
+      [[ -n "$package" ]] || fail "no recording package"
+      "$BIN" edit "$package"; sleep 4
+      local studio; studio="$(window_titled '*BetterShot Studio')"
+      [[ -n "$studio" ]] || fail "the studio did not open"
+      xdotool windowactivate --sync "$studio" 2>/dev/null || true; sleep 0.5
+      xdotool key d; sleep 1
+      xdotool key --repeat 40 --delay 15 Right; sleep 2
+      shot "$SCENARIO-$APPEARANCE-2-shot"
+      xdotool key ctrl+s
+      # The 3D pass runs on the CPU: a nine-second clip takes a minute or two here.
+      for _ in $(seq 1 400); do [[ $(saved_files | wc -l) -ge 1 ]] && break; sleep 1; done; sleep 2
+      python3 - "$package/edit.json" <<'PY' || fail "the saved project lacks the 3D shot"
+import json, sys
+d = json.load(open(sys.argv[1]))
+shots = d.get("shots3D", [])
+print(len(shots), shots and (shots[0]["start"], shots[0]["end"], shots[0]["startPose"]["camera"]["tiltX"], shots[0]["blur"]["mode"]), file=sys.stderr)
+ok = len(shots) == 1 and shots[0]["start"] == 0 and abs(shots[0]["end"] - 3) < 1e-9
+ok = ok and abs(shots[0]["startPose"]["camera"]["tiltX"] + 46.65) < 1e-9 and shots[0]["easing"] == "Linear" and shots[0]["blur"]["bokeh"] is True
+sys.exit(0 if ok else 1)
+PY
       [[ $(saved_files | wc -l) -eq 1 ]] || fail "Save wrote $(saved_files | wc -l) files"
       xdotool key ctrl+w; sleep 1
       [[ -z "$(window_titled '*BetterShot Studio')" ]] || fail "the studio did not close after saving"
@@ -755,6 +949,12 @@ done
 for appearance in light dark; do
   scenario record "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": true}"
 done
+scenario handles light '{"bs_onboardingSeenVersion": 2, "bs_playSound": false, "afterCapture.recording.save": false, "recordingCameraDeviceID": "cam"}'
+scenario reframe light '{"bs_onboardingSeenVersion": 2, "bs_playSound": false, "afterCapture.recording.save": false}'
+# System audio (a test source) gives the studio a soundtrack to play and a Transcribe control.
+scenario captions light '{"bs_onboardingSeenVersion": 2, "bs_playSound": false, "afterCapture.recording.save": false, "recordingSystemAudio": true}'
+scenario teleprompter light '{"bs_onboardingSeenVersion": 2, "bs_playSound": false, "afterCapture.recording.save": false, "recordingTeleprompterEnabled": true, "recordingTeleprompterLineCount": 2, "recordingTeleprompterScript": "Welcome to BetterShot for Linux. This prompter shows your script near the top of the screen while you record.\nScroll it with the mouse wheel or the arrow keys, one line at a time, and keep talking."}'
+scenario shots3d light '{"bs_onboardingSeenVersion": 2, "bs_playSound": false, "afterCapture.recording.save": false}'
 for appearance in light dark; do
   scenario cursor "$appearance" "{\"bs_appAppearance\": \"$appearance\", \"bs_onboardingSeenVersion\": 2, \"bs_playSound\": false, \"afterCapture.recording.save\": false}"
 done

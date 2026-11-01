@@ -42,6 +42,13 @@ pub mod keys {
     pub const RECORDING_FRAME_RATE: &str = "bs_recordingFrameRate";
     /// Linux only: the source mode the recording bar last used.
     pub const RECORDING_SOURCE_MODE: &str = "bs_recordingSourceMode";
+    /// The teleprompter (`BetterShotPreferences.recordingTeleprompter*`):
+    /// whether it shows while recording, its script, and the lines shown.
+    pub const TELEPROMPTER_ENABLED: &str = "recordingTeleprompterEnabled";
+    pub const TELEPROMPTER_SCRIPT: &str = "recordingTeleprompterScript";
+    pub const TELEPROMPTER_LINE_COUNT: &str = "recordingTeleprompterLineCount";
+    /// Linux only: the whisper.cpp model file used to transcribe narration.
+    pub const WHISPER_MODEL_PATH: &str = "bs_whisperModelPath";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -290,6 +297,32 @@ impl AppPreferences<'_> {
 
 /// Frame rates the Recording settings offer.
 pub const RECORDING_FRAME_RATE_CHOICES: [i64; 3] = [24, 30, 60];
+pub const TELEPROMPTER_LINE_RANGE: (i64, i64) = (1, 6);
+
+impl AppPreferences<'_> {
+    pub fn teleprompter_enabled(&self) -> bool {
+        self.prefs.bool(keys::TELEPROMPTER_ENABLED)
+    }
+
+    pub fn teleprompter_script(&self) -> String {
+        self.prefs.string(keys::TELEPROMPTER_SCRIPT).unwrap_or_default().to_owned()
+    }
+
+    /// The whisper.cpp model chosen in Settings, if any.
+    pub fn whisper_model_path(&self) -> Option<PathBuf> {
+        self.prefs.string(keys::WHISPER_MODEL_PATH).filter(|p| !p.is_empty()).map(PathBuf::from)
+    }
+
+    /// Lines the prompter shows at once (3 unless set).
+    pub fn teleprompter_line_count(&self) -> i64 {
+        let value = self.prefs.integer(keys::TELEPROMPTER_LINE_COUNT);
+        if value == 0 {
+            3
+        } else {
+            value.clamp(TELEPROMPTER_LINE_RANGE.0, TELEPROMPTER_LINE_RANGE.1)
+        }
+    }
+}
 
 /// Remembers the area chosen with BetterShot's selector for Capture Previous Region.
 pub fn set_last_region_rect(prefs: &mut Preferences, rect: Rect) -> io::Result<()> {

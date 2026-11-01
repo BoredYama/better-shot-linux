@@ -156,3 +156,21 @@ window.pinned-screenshot {
 .onboarding-dot.current {
   color: @accent_color;
 }
+
+/* The teleprompter: a dark prompter hanging near the top of the screen. */
+.teleprompter-overlay {
+  background-color: alpha(black, 0.92);
+  border-radius: 0 0 16px 16px;
+  color: white;
+}
+.teleprompter-overlay .teleprompter-line {
+  color: alpha(white, 0.6);
+  font-size: 13pt;
+  font-weight: 500;
+}
+.teleprompter-overlay .teleprompter-active {
+  color: white;
+}
+.teleprompter-overlay button {
+  color: alpha(white, 0.8);
+}

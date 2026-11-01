@@ -9,8 +9,11 @@
 //! and clip-cut, speed-adjusted audio into an H.264 encoder and muxer.
 
 use crate::media;
-use bettershot_core::recording::edit::{MaskSegment, StudioStyle, UnitRect};
-use bettershot_core::recording::{ClipTimeline, PointerTimeline, StudioLayout, ViewportTimeline};
+use bettershot_core::recording::edit::{KeystrokePlacement, MaskSegment, StudioStyle, SubtitleBarStyle, UnitRect};
+use bettershot_core::recording::{
+    ClipTimeline, KaraokeTimeline, KeystrokeCaptionTimeline, PointerTimeline, Shot3D, StudioLayout, SubtitleTimeline,
+    Timeline3D, ViewportTimeline,
+};
 use bettershot_render::studio::{Frame, StudioCompositor};
 use gst::prelude::*;
 use std::path::{Path, PathBuf};
@@ -231,6 +234,88 @@ impl Drop for AudioReader {
     }
 }
 
+// MARK: - Preview playback
+
+/// Plays the recording's mixed audio tracks for the studio preview, which
+/// steps its own frames: the caller seeks it to the source time of each
+/// clip at that clip's speed and pauses it with the transport. Without an
+/// audio output (or under testing) it plays silently into a fake sink, so
+/// the preview behaves the same everywhere.
+pub struct AudioPlayer {
+    pipeline: gst::Pipeline,
+    rate: f64,
+}
+
+impl AudioPlayer {
+    /// None when the movie has no audio or the pipeline cannot be built.
+    pub fn open(path: &Path) -> Option<Self> {
+        media::init().ok()?;
+        let info = media::probe(path).ok()?;
+        if info.audio_streams == 0 {
+            return None;
+        }
+        let testing = std::env::var("BETTERSHOT_TESTING").as_deref() == Ok("1");
+        let sinks: &[&str] = if testing { &["fakesink sync=true"] } else { &["autoaudiosink", "fakesink sync=true"] };
+        for sink in sinks {
+            let mut description = format!(
+                "filesrc location=\"{}\" ! qtdemux name=demux audiomixer name=mix ! audioconvert ! audioresample ! volume name=volume ! {sink}",
+                media::escape(&path.to_string_lossy())
+            );
+            for index in 0..info.audio_streams {
+                description.push_str(&format!(
+                    " demux.audio_{index} ! queue ! decodebin ! audioconvert ! audioresample ! audio/x-raw,rate={AUDIO_RATE},channels={AUDIO_CHANNELS} ! mix."
+                ));
+            }
+            let Ok(element) = gst::parse::launch(&description) else { continue };
+            let Ok(pipeline) = element.downcast::<gst::Pipeline>() else { continue };
+            if pipeline.set_state(gst::State::Paused).is_err() {
+                continue;
+            }
+            let (result, _, _) = pipeline.state(gst::ClockTime::from_seconds(10));
+            if result.is_err() {
+                let _ = pipeline.set_state(gst::State::Null);
+                continue;
+            }
+            return Some(Self { pipeline, rate: 1.0 });
+        }
+        None
+    }
+
+    /// Starts playing from `source_seconds` at `rate` (a clip's speed).
+    pub fn play_from(&mut self, source_seconds: f64, rate: f64) {
+        self.rate = rate.clamp(0.1, 16.0);
+        let target = gst::ClockTime::from_nseconds((source_seconds.max(0.0) * 1e9) as u64);
+        let _ = self.pipeline.seek(
+            self.rate,
+            gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+            gst::SeekType::Set,
+            target,
+            gst::SeekType::None,
+            gst::ClockTime::NONE,
+        );
+        let _ = self.pipeline.set_state(gst::State::Playing);
+    }
+
+    pub fn pause(&mut self) {
+        let _ = self.pipeline.set_state(gst::State::Paused);
+    }
+
+    /// The source time the player has reached, for drift checks.
+    pub fn position(&self) -> Option<f64> {
+        self.pipeline.query_position::<gst::ClockTime>().map(|t| t.seconds_f64())
+    }
+
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+}
+
+impl Drop for AudioPlayer {
+    fn drop(&mut self) {
+        let _ = self.pipeline.set_state(gst::State::Null);
+    }
+}
+
 // MARK: - Export
 
 #[derive(Debug)]
@@ -271,6 +356,13 @@ pub struct ExportRequest {
     /// The synthetic pointer, when the capture hid the system cursor.
     pub pointer: Option<PointerTimeline>,
     pub shows_press_effects: bool,
+    /// Viewport samples per output frame while the camera moves (1 = none).
+    pub motion_blur_samples: u32,
+    /// 3D shots on the edited timeline.
+    pub shots_3d: Vec<Shot3D>,
+    /// Keystroke captions and the subtitle bar, drawn at each frame's source time.
+    pub keystrokes: Option<(KeystrokeCaptionTimeline, KeystrokePlacement)>,
+    pub subtitles: Option<(SubtitleTimeline, SubtitleBarStyle, Option<KaraokeTimeline>)>,
     pub canvas: (u32, u32),
     pub frames_per_second: u32,
     /// x264 constant quality (lower is better).
@@ -458,7 +550,9 @@ pub fn export(
             request.crop,
             request.masks.clone(),
         )
-        .with_pointer(request.pointer.clone(), request.shows_press_effects);
+        .with_pointer(request.pointer.clone(), request.shows_press_effects)
+        .with_overlays(Some(request.clips.clone()), request.keystrokes.clone(), request.subtitles.clone())
+        .with_shots_3d(Timeline3D::new(&request.shots_3d, request.clips.duration()), 1.0);
         let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width as i32, height as i32)
             .map_err(|e| ExportError::Failed(e.to_string()))?;
         let duration = request.clips.duration();
@@ -488,11 +582,20 @@ pub fn export(
                 }
                 _ => None,
             };
+            // The output timeline is gapless, so the shutter window for
+            // motion-blur supersampling is exactly one output frame.
+            let shutter = 1.0 / f64::from(fps);
+            let samples = StudioCompositor::sample_times(
+                editor_time,
+                shutter,
+                compositor.blur_sample_count(editor_time, shutter, request.motion_blur_samples),
+            );
             compositor.render_into(
                 &surface,
                 screen_frame.as_ref().unwrap_or(&fallback),
                 camera_frame.as_ref(),
                 editor_time,
+                &samples,
             );
             let bytes = {
                 surface.flush();
@@ -612,6 +715,14 @@ mod tests {
         audio.seek(1.0).unwrap();
         let chunk = audio.next_chunk().unwrap();
         assert!(chunk.pts <= 1.05 && chunk.frames() > 0);
+        // The preview player runs silently under testing and follows seeks.
+        let mut player = AudioPlayer::open(&screen).expect("a player for the recording");
+        player.play_from(1.0, 2.0);
+        std::thread::sleep(Duration::from_millis(400));
+        let position = player.position().expect("position");
+        assert!((1.0..3.0).contains(&position), "{position}");
+        assert_eq!(player.rate(), 2.0);
+        player.pause();
 
         // Cut the middle out, slow the first half, and frame it on a color.
         let info = media::probe(&screen).unwrap();
@@ -640,6 +751,10 @@ mod tests {
             masks: Vec::new(),
             pointer: None,
             shows_press_effects: true,
+            motion_blur_samples: 4,
+            shots_3d: Vec::new(),
+            keystrokes: None,
+            subtitles: None,
             canvas,
             frames_per_second: 30,
             crf: 26,

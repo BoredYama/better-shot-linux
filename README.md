@@ -44,6 +44,14 @@ Or download the Apple silicon or Intel `.dmg` from
 Requires macOS 14 or later. Microphone narration needs macOS 15, and narration
 subtitles and teleprompter speech tracking need macOS 26.
 
+### Linux
+
+BetterShot also runs on Linux desktops (GNOME, KDE Plasma, and others with
+GTK 4) as a Rust port in [linux/](linux/). Build it from source or package it
+as a `.deb`, an AppImage, or a Flatpak with the targets in `linux/Makefile`;
+see [linux/README.md](linux/README.md) for what is ported, the dependencies,
+and the differences from the Mac app.
+
 ## Features
 
 - **Screenshots:** region, window, fullscreen, and scrolling capture, plus OCR and a color picker.

@@ -378,6 +378,14 @@ impl ViewportTimeline {
         Self { frames: vec![ViewportFrame::IDENTITY], duration: 0.0 }
     }
 
+    /// A timeline sampled at `STEP_RATE` by another planner (the reframe track).
+    pub fn from_frames(frames: Vec<ViewportFrame>, duration: f64) -> Self {
+        if frames.is_empty() {
+            return Self::identity();
+        }
+        Self { frames, duration }
+    }
+
     pub fn cropped(&self, crop: &UnitRect) -> Self {
         if crop.is_unit() {
             return self.clone();

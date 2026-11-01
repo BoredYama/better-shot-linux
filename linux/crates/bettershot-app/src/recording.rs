@@ -8,7 +8,7 @@
 //! - Discard and Start Over confirm first, through a standalone dialog.
 
 use crate::app::App;
-use crate::{capture, countdown, recording_bar, recording_card, selector, services};
+use crate::{capture, countdown, recording_bar, recording_card, selector, services, teleprompter};
 use bettershot_core::after_capture::{self, AfterCaptureAction, CaptureType};
 use bettershot_core::app_prefs::keys;
 use bettershot_core::capture_record::CaptureKind;
@@ -202,6 +202,7 @@ async fn begin(app: &App, mode: SourceMode, generation: u64) -> Result<(), Start
     });
     set_state(RecordingState::Recording);
     start_timer();
+    teleprompter::begin_session(app);
     // The bar was hidden for the area selection and remapped under the
     // windows restored after it; bring it forward once they have settled.
     glib::timeout_add_local_once(Duration::from_millis(300), || {
@@ -406,6 +407,12 @@ fn finish(action: FinishAction) {
     set_state(RecordingState::Finishing);
     glib::spawn_future_local(async move {
         let recorder = with(|m| m.recorder.take());
+        // The pointer stops with the footage, not after the file is finalized.
+        with(|m| {
+            if let Some(sampler) = m.sampler.as_mut() {
+                sampler.stop();
+            }
+        });
         let finished = match recorder {
             Some(recorder) => Some(recorder.stop().await),
             None => None,
@@ -476,6 +483,7 @@ async fn finalize(app: &App, finished: Option<Finished>) {
 
     set_state(RecordingState::Idle);
     recording_bar::hide_recording();
+    teleprompter::end_session();
 
     let usable_session = session.clone().filter(|_| usable);
     let Some(session) = usable_session else {

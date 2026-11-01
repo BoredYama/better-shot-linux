@@ -10,6 +10,7 @@
 //! Every file keeps the macOS layout and JSON, so a package recorded on one
 //! platform opens on the other.
 
+pub mod captions;
 pub mod clips;
 pub mod deliverable;
 pub mod edit;
@@ -17,9 +18,14 @@ pub mod layout;
 pub mod manifest;
 pub mod pointer;
 pub mod recovery;
+pub mod reframe;
 pub mod session;
+pub mod shots3d;
+pub mod style_presets;
+pub mod transcription;
 pub mod viewport;
 
+pub use captions::{KaraokeTimeline, KeystrokeCaptionTimeline, SubtitleTimeline};
 pub use clips::{ClipSegment, ClipSpeedDraft, ClipTimeline};
 pub use deliverable::{deliverable_path, export_path, file_name, name, needs_render, save};
 pub use edit::{RecordingEditDocument, StudioStyle, UnitRect, VideoCompressionSettings};
@@ -30,7 +36,11 @@ pub use manifest::{
 };
 pub use pointer::{PointerFrame, PointerTimeline, PointerTimelineOptions};
 pub use recovery::{recover_interrupted, PlayableMetadata};
+pub use reframe::ReframeTrack;
 pub use session::{RecordingSession, RecordingSessionStore, VideoExportContainer};
+pub use shots3d::{Blur3D, Pose3D, Preset3D, Projection, Scene3D, Shot3D, Timeline3D};
+pub use style_presets::{StylePreset, StylePresetStore};
+pub use transcription::Transcript;
 pub use viewport::{synthesize_cues, UnitPoint, ViewportFrame, ViewportTimeline, ZoomCue};
 
 use chrono::{DateTime, Utc};

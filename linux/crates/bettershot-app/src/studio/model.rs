@@ -5,13 +5,15 @@
 //! export requests. Everything the window shows comes from here.
 
 use bettershot_core::recording::edit::{
-    MaskEffect, MaskSegment, RecordingEditDocument, StudioStyle, UnitRect, VideoCompressionSettings,
+    ExportAspectContentMode, ExportAspectPreset, KeystrokePlacement, MaskEffect, MaskSegment, RecordingEditDocument,
+    StudioStyle, SubtitleBarStyle, SubtitleCue, TranscriptWord, UnitRect, VideoCompressionSettings,
 };
 use bettershot_core::recording::pointer::{self as pointer, PointerTimelineOptions};
 use bettershot_core::recording::viewport::{UnitPoint, ZoomAnchorMode};
 use bettershot_core::recording::{
-    self, deliverable, ClipSegment, ClipTimeline, ContentMode, PointerCaptureFile, PointerTimeline, RecordingSession,
-    StudioLayout, ViewportTimeline, ZoomCue,
+    self, deliverable, ClipSegment, ClipTimeline, ContentMode, KaraokeTimeline, KeystrokeCaptionTimeline,
+    PointerCaptureFile, PointerTimeline, Preset3D, RecordingSession, ReframeTrack, Shot3D, StudioLayout,
+    SubtitleTimeline, Timeline3D, ViewportTimeline, ZoomCue,
 };
 use bettershot_platform::video::{self, ExportRequest, FrameReader};
 use bettershot_render::studio::StudioCompositor;
@@ -30,6 +32,18 @@ pub struct Snapshot {
     pub export_settings: VideoCompressionSettings,
     /// Click pulses over the synthetic pointer (`showsClickEffects`).
     pub shows_click_effects: bool,
+    /// The output aspect and how the recording fills it.
+    pub export_aspect: ExportAspectPreset,
+    pub export_aspect_mode: ExportAspectContentMode,
+    pub shows_keystrokes: bool,
+    pub keystroke_placement: KeystrokePlacement,
+    pub shows_subtitles: bool,
+    pub subtitle_style: SubtitleBarStyle,
+    /// The narration transcript (from macOS, or whisper.cpp here).
+    pub subtitle_cues: Vec<SubtitleCue>,
+    pub subtitle_words: Vec<TranscriptWord>,
+    /// 3D shots on the edited timeline.
+    pub shots_3d: Vec<Shot3D>,
 }
 
 pub struct StudioModel {
@@ -37,6 +51,8 @@ pub struct StudioModel {
     pub source_duration: f64,
     pub source_size: (u32, u32),
     pub has_camera: bool,
+    /// Whether the recording has audio tracks to play and transcribe.
+    pub has_audio: bool,
     pub camera_lead_in: f64,
     /// True when the capture hid the system cursor, so the studio draws it
     /// from `input.json` and can restyle it.
@@ -54,9 +70,17 @@ pub struct StudioModel {
     pub selected_clip: Option<Uuid>,
     pub selected_cue: Option<Uuid>,
     pub selected_mask: Option<Uuid>,
+    pub selected_shot: Option<String>,
     pub scissors: bool,
+    /// While the crop is adjusted on the preview: the crop before editing
+    /// began and the undo depth then, so cancelling restores both.
+    crop_editing: Option<(UnitRect, usize)>,
     pub viewport: ViewportTimeline,
     pub pointer: PointerTimeline,
+    /// Captions from the recorded chords and the project's subtitles.
+    keystrokes: KeystrokeCaptionTimeline,
+    subtitles: SubtitleTimeline,
+    karaoke: KaraokeTimeline,
     pub screen: FrameReader,
     pub camera: Option<FrameReader>,
     pub compositor: StudioCompositor,
@@ -75,6 +99,7 @@ impl StudioModel {
             _ => (screen.width, screen.height),
         };
         let has_camera = session.has_camera();
+        let has_audio = manifest.as_ref().is_some_and(|m| m.includes_system_audio || m.includes_microphone);
         let camera = if has_camera { FrameReader::open(&session.camera_path()).ok() } else { None };
         let camera_lead_in = manifest.as_ref().and_then(|m| m.camera_lead_in).unwrap_or(0.0);
         let pointer_synthesized = manifest.as_ref().is_some_and(|m| !m.pointer_in_pixels());
@@ -92,6 +117,15 @@ impl StudioModel {
             masks: document.masks_value(),
             export_settings: document.export_settings_value(),
             shows_click_effects: document.shows_click_effects.unwrap_or(press_effects_default),
+            export_aspect: document.export_aspect_preset(),
+            export_aspect_mode: document.export_aspect_content_mode(),
+            shows_keystrokes: document.shows_keystrokes.unwrap_or(true),
+            keystroke_placement: document.keystroke_placement.unwrap_or_default(),
+            shows_subtitles: document.shows_subtitles.unwrap_or(true),
+            subtitle_style: document.subtitle_style(),
+            subtitle_cues: document.subtitle_cues.clone().unwrap_or_default(),
+            subtitle_words: document.subtitle_words.clone().unwrap_or_default(),
+            shots_3d: Timeline3D::parse(document.shots_3d.as_deref().unwrap_or_default()),
         };
         let state = match &loaded {
             Some(document) => snapshot_of(document),
@@ -104,6 +138,15 @@ impl StudioModel {
                 masks: Vec::new(),
                 export_settings: VideoCompressionSettings::default(),
                 shows_click_effects: press_effects_default,
+                export_aspect: ExportAspectPreset::Original,
+                export_aspect_mode: ExportAspectContentMode::Fill,
+                shows_keystrokes: true,
+                keystroke_placement: KeystrokePlacement::default(),
+                shows_subtitles: true,
+                subtitle_style: SubtitleBarStyle::default(),
+                subtitle_cues: Vec::new(),
+                subtitle_words: Vec::new(),
+                shots_3d: Vec::new(),
             },
         };
         let base_document = loaded.clone().unwrap_or_else(|| RecordingEditDocument::new(&state.style, &state.clips));
@@ -114,15 +157,36 @@ impl StudioModel {
             }
             None => state.clone(),
         };
-        let viewport = Self::build_viewport(&state, &capture);
+        let keystrokes = KeystrokeCaptionTimeline::new(&capture.keystrokes);
+        let subtitles = SubtitleTimeline::new(&state.subtitle_cues);
+        let karaoke = KaraokeTimeline::new(&state.subtitle_cues, &state.subtitle_words);
         let pointer = Self::build_pointer(&state, &capture, source_duration, recording_point_size, pointer_synthesized);
-        let compositor =
-            Self::build_compositor(&state, source_size, has_camera, &viewport, &pointer, pointer_synthesized);
+        let viewport = Self::build_viewport(
+            &state,
+            &capture,
+            source_size,
+            source_duration,
+            recording_point_size,
+            &pointer,
+            pointer_synthesized,
+        );
+        let overlays = Overlays { keystrokes: &keystrokes, subtitles: &subtitles, karaoke: &karaoke };
+        let compositor = Self::build_compositor(
+            &state,
+            source_size,
+            has_camera,
+            &viewport,
+            &pointer,
+            pointer_synthesized,
+            false,
+            overlays,
+        );
         Ok(Self {
             session,
             source_duration,
             source_size,
             has_camera,
+            has_audio,
             camera_lead_in,
             pointer_synthesized,
             recording_point_size,
@@ -135,9 +199,14 @@ impl StudioModel {
             selected_clip: None,
             selected_cue: None,
             selected_mask: None,
+            selected_shot: None,
             scissors: false,
+            crop_editing: None,
             viewport,
             pointer,
+            keystrokes,
+            subtitles,
+            karaoke,
             screen,
             camera,
             compositor,
@@ -147,25 +216,28 @@ impl StudioModel {
 
     // MARK: - Derived
 
-    /// The output canvas: the source size, or the reframe preset's.
-    pub fn canvas_size(&self) -> (f64, f64) {
-        let source = (f64::from(self.source_size.0), f64::from(self.source_size.1));
-        self.base_document.export_aspect_preset().canvas_size(source)
+    /// The cropped source in even pixels (`croppedVideoSize`), the basis of
+    /// every output canvas.
+    fn cropped_size(state: &Snapshot, source_size: (u32, u32)) -> (f64, f64) {
+        state.crop.cropped_size((f64::from(source_size.0), f64::from(source_size.1)))
     }
 
-    fn make_layout(
-        state: &Snapshot,
-        source_size: (u32, u32),
-        has_camera: bool,
-        document: &RecordingEditDocument,
-    ) -> StudioLayout {
-        let source = (f64::from(source_size.0), f64::from(source_size.1));
-        let preset = document.export_aspect_preset();
-        let canvas = preset.canvas_size(source);
-        let reframed = preset.ratio().is_some();
-        let fit = reframed
-            && document.export_aspect_content_mode() == bettershot_core::recording::edit::ExportAspectContentMode::Fit;
-        let aspect = (reframed && source.1 > 0.0).then_some(source.0 / source.1);
+    /// The output canvas: the cropped source size, or the reframe preset's.
+    pub fn canvas_size(&self) -> (f64, f64) {
+        Self::canvas_for(&self.state, self.source_size)
+    }
+
+    fn canvas_for(state: &Snapshot, source_size: (u32, u32)) -> (f64, f64) {
+        state.export_aspect.canvas_size(Self::cropped_size(state, source_size))
+    }
+
+    /// The layout for `canvas`: a reframe aspect-fills or fits the cropped
+    /// source into the card, as `makeExportConfiguration` arranges it.
+    fn make_layout(state: &Snapshot, source_size: (u32, u32), has_camera: bool, canvas: (f64, f64)) -> StudioLayout {
+        let cropped = Self::cropped_size(state, source_size);
+        let reframed = state.export_aspect.ratio().is_some();
+        let fit = reframed && state.export_aspect_mode == ExportAspectContentMode::Fit;
+        let aspect = (reframed && cropped.1 > 0.0).then_some(cropped.0 / cropped.1);
         StudioLayout::make(
             canvas,
             &state.style,
@@ -175,12 +247,58 @@ impl StudioModel {
         )
     }
 
-    fn build_viewport(state: &Snapshot, capture: &PointerCaptureFile) -> ViewportTimeline {
-        if state.zoom_enabled {
-            ViewportTimeline::build(&state.zoom_cues, capture, &state.clips).cropped(&state.crop)
+    /// The virtual camera: the zoom viewport through the crop, or, when
+    /// exporting into another aspect with Fill, the crop-and-follow reframe
+    /// camera built on top of it (`makeReframeTrack`).
+    fn build_viewport(
+        state: &Snapshot,
+        capture: &PointerCaptureFile,
+        source_size: (u32, u32),
+        source_duration: f64,
+        recording_point_size: (f64, f64),
+        pointer: &PointerTimeline,
+        synthesized: bool,
+    ) -> ViewportTimeline {
+        let zoomed = if state.zoom_enabled {
+            ViewportTimeline::build(&state.zoom_cues, capture, &state.clips)
         } else {
             ViewportTimeline::identity()
+        };
+        let cropped = zoomed.cropped(&state.crop);
+        if state.export_aspect.ratio().is_none() || state.export_aspect_mode != ExportAspectContentMode::Fill {
+            return cropped;
         }
+        // Focus comes from the recorded pointer whenever the session
+        // captured one, whether or not the cursor is drawn synthetically.
+        let focus = if synthesized {
+            Some(pointer.clone())
+        } else if capture.has_pointer_data() {
+            Some(PointerTimeline::build(
+                capture,
+                source_duration,
+                PointerTimelineOptions {
+                    recording_size_in_points: recording_point_size,
+                    clips: Some(&state.clips),
+                    ..Default::default()
+                },
+            ))
+        } else {
+            None
+        };
+        let crop = state.crop;
+        ReframeTrack::build(
+            state.export_aspect,
+            Self::cropped_size(state, source_size),
+            &cropped,
+            state.clips.duration(),
+            |time| {
+                let location = focus.as_ref()?.location(time)?;
+                let remapped = crop.point(location);
+                Some(UnitPoint::new(remapped.x.clamp(0.0, 1.0), remapped.y.clamp(0.0, 1.0)))
+            },
+        )
+        .map(|track| track.timeline)
+        .unwrap_or(cropped)
     }
 
     /// Port of `rebuildPointerTimeline`: the smoothed cursor along the
@@ -210,6 +328,7 @@ impl StudioModel {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_compositor(
         state: &Snapshot,
         source_size: (u32, u32),
@@ -217,18 +336,123 @@ impl StudioModel {
         viewport: &ViewportTimeline,
         pointer: &PointerTimeline,
         synthesized: bool,
+        editing_crop: bool,
+        overlays: Overlays<'_>,
     ) -> StudioCompositor {
-        let document = RecordingEditDocument::new(&state.style, &state.clips);
-        let layout = Self::make_layout(state, source_size, has_camera, &document);
-        StudioCompositor::new(
-            layout.canvas_size,
-            state.style.clone(),
-            layout,
-            viewport.clone(),
-            state.crop,
-            state.masks.clone(),
-        )
-        .with_pointer(synthesized.then(|| pointer.clone()), state.shows_click_effects)
+        // Crop editing shows the whole, unzoomed source so its handles stay
+        // in source coordinates, as the macOS flat player does.
+        let (viewport, crop, layout) = if editing_crop {
+            let uncropped =
+                Snapshot { crop: UnitRect::UNIT, export_aspect: ExportAspectPreset::Original, ..state.clone() };
+            let canvas = Self::canvas_for(&uncropped, source_size);
+            (
+                ViewportTimeline::identity(),
+                UnitRect::UNIT,
+                Self::make_layout(&uncropped, source_size, has_camera, canvas),
+            )
+        } else {
+            let canvas = Self::canvas_for(state, source_size);
+            (viewport.clone(), state.crop, Self::make_layout(state, source_size, has_camera, canvas))
+        };
+        let shots =
+            if editing_crop { Timeline3D::empty() } else { Timeline3D::new(&state.shots_3d, state.clips.duration()) };
+        StudioCompositor::new(layout.canvas_size, state.style.clone(), layout, viewport, crop, state.masks.clone())
+            .with_pointer(synthesized.then(|| pointer.clone()), state.shows_click_effects)
+            .with_overlays(Some(state.clips.clone()), overlays.keystrokes_for(state), overlays.subtitles_for(state))
+            .with_shots_3d(shots, 0.5)
+    }
+
+    // MARK: - 3D shots
+
+    /// The normalized shots, as the compositor and the lane use them.
+    pub fn timeline_3d(&self) -> Timeline3D {
+        Timeline3D::new(&self.state.shots_3d, self.duration())
+    }
+
+    /// Adds a shot in the free span at the playhead (`insertionRange`) with
+    /// `preset`; false when the playhead sits on a shot or in a gap too short.
+    pub fn add_shot_at_playhead(&mut self, preset: Preset3D) -> bool {
+        let timeline = self.timeline_3d();
+        let Some((start, end)) = timeline.insertion_range(self.playhead, self.duration()) else { return false };
+        let mut shot = Shot3D::new(start, end);
+        shot.apply(preset);
+        let id = shot.id.clone();
+        self.edit(|s| s.shots_3d.push(shot));
+        self.selected_shot = Some(id);
+        true
+    }
+
+    /// Replaces every shot with Cap's automatic scene of `count` shots.
+    pub fn apply_auto_scene(&mut self, count: usize) {
+        let cuts: Vec<f64> = self.state.clips.cut_markers(self.source_duration).iter().map(|m| m.editor_time).collect();
+        let shots = Timeline3D::auto_scene(count, self.duration(), &cuts);
+        self.edit(|s| s.shots_3d = shots);
+        self.selected_shot = None;
+    }
+
+    pub fn remove_shot(&mut self, id: &str) {
+        let id = id.to_owned();
+        self.edit(|s| s.shots_3d.retain(|shot| shot.id != id));
+    }
+
+    pub fn update_shot(&mut self, shot: Shot3D, coalesced: bool) {
+        let apply = |s: &mut Snapshot| {
+            if let Some(slot) = s.shots_3d.iter_mut().find(|existing| existing.id == shot.id) {
+                *slot = shot;
+            }
+        };
+        if coalesced {
+            self.edit_coalesced(apply);
+        } else {
+            self.edit(apply);
+        }
+    }
+
+    pub fn shot_at_playhead(&self) -> Option<String> {
+        self.timeline_3d().shot(self.playhead).map(|s| s.id.clone())
+    }
+
+    pub fn has_keystrokes(&self) -> bool {
+        !self.keystrokes.is_empty()
+    }
+
+    pub fn has_subtitles(&self) -> bool {
+        !self.subtitles.is_empty()
+    }
+
+    pub fn has_word_timings(&self) -> bool {
+        !self.karaoke.is_empty()
+    }
+
+    // MARK: - Crop editing on the preview
+
+    pub fn is_editing_crop(&self) -> bool {
+        self.crop_editing.is_some()
+    }
+
+    /// Shows the full source with crop handles; edits until Apply are one
+    /// undo step, and Cancel restores the crop that was applied before.
+    pub fn begin_crop_edit(&mut self) {
+        if self.crop_editing.is_none() {
+            self.crop_editing = Some((self.state.crop, self.undo.len()));
+            self.invalidate();
+        }
+    }
+
+    pub fn apply_crop_edit(&mut self) {
+        if self.crop_editing.take().is_some() {
+            self.invalidate();
+        }
+    }
+
+    /// Port of "clicking Crop again cancels the uncommitted crop": the
+    /// previously applied crop survives.
+    pub fn cancel_crop_edit(&mut self) {
+        if let Some((before, undo_len)) = self.crop_editing.take() {
+            self.state.crop = before;
+            self.undo.truncate(undo_len);
+            self.invalidate();
+        }
     }
 
     /// Whether the pointer can be restyled: the capture hid the cursor.
@@ -256,14 +480,33 @@ impl StudioModel {
         !self.redo.is_empty()
     }
 
+    /// Replaces the transcript (None removes it), as one undo step.
+    pub fn set_transcript(&mut self, cues: Vec<SubtitleCue>, words: Vec<TranscriptWord>) {
+        self.edit(|s| {
+            s.subtitle_cues = cues;
+            s.subtitle_words = words;
+            s.shows_subtitles = true;
+        });
+    }
+
     /// Rebuilds the camera path, pointer, and compositor after an edit.
     fn invalidate(&mut self) {
-        self.viewport = Self::build_viewport(&self.state, &self.capture);
+        self.subtitles = SubtitleTimeline::new(&self.state.subtitle_cues);
+        self.karaoke = KaraokeTimeline::new(&self.state.subtitle_cues, &self.state.subtitle_words);
         self.pointer = Self::build_pointer(
             &self.state,
             &self.capture,
             self.source_duration,
             self.recording_point_size,
+            self.pointer_synthesized,
+        );
+        self.viewport = Self::build_viewport(
+            &self.state,
+            &self.capture,
+            self.source_size,
+            self.source_duration,
+            self.recording_point_size,
+            &self.pointer,
             self.pointer_synthesized,
         );
         self.compositor = Self::build_compositor(
@@ -273,6 +516,8 @@ impl StudioModel {
             &self.viewport,
             &self.pointer,
             self.pointer_synthesized,
+            self.crop_editing.is_some(),
+            Overlays { keystrokes: &self.keystrokes, subtitles: &self.subtitles, karaoke: &self.karaoke },
         );
         self.playhead = self.playhead.min(self.duration()).max(0.0);
         if self.selected_clip.is_some_and(|id| !self.state.clips.segments.iter().any(|s| s.id == id)) {
@@ -283,6 +528,9 @@ impl StudioModel {
         }
         if self.selected_mask.is_some_and(|id| !self.state.masks.iter().any(|m| m.id == id)) {
             self.selected_mask = None;
+        }
+        if self.selected_shot.as_ref().is_some_and(|id| !self.state.shots_3d.iter().any(|s| s.id == *id)) {
+            self.selected_shot = None;
         }
     }
 
@@ -508,6 +756,17 @@ impl StudioModel {
         document.set_masks(&self.state.masks);
         document.export_settings = Some(self.state.export_settings.clone());
         document.shows_click_effects = Some(self.state.shows_click_effects);
+        document.export_aspect = Some(self.state.export_aspect.raw_value().to_owned());
+        document.export_aspect_mode = Some(self.state.export_aspect_mode.raw_value().to_owned());
+        document.shows_keystrokes = Some(self.state.shows_keystrokes);
+        document.keystroke_placement = Some(self.state.keystroke_placement);
+        document.shows_subtitles = Some(self.state.shows_subtitles);
+        document.subtitle_vertical_position = Some(self.state.subtitle_style.vertical_position);
+        document.subtitle_font_scale = Some(self.state.subtitle_style.font_scale);
+        document.subtitle_word_highlight = Some(self.state.subtitle_style.highlights_spoken_word);
+        document.subtitle_cues = (!self.state.subtitle_cues.is_empty()).then(|| self.state.subtitle_cues.clone());
+        document.subtitle_words = (!self.state.subtitle_words.is_empty()).then(|| self.state.subtitle_words.clone());
+        document.shots_3d = (!self.state.shots_3d.is_empty()).then(|| Timeline3D::to_values(&self.state.shots_3d));
         document
     }
 
@@ -545,7 +804,8 @@ impl StudioModel {
             && (!self.state.zoom_enabled || self.state.zoom_cues.is_empty())
             && self.state.crop.is_unit()
             && self.state.masks.is_empty()
-            && self.base_document.export_aspect_preset().ratio().is_none()
+            && self.state.shots_3d.is_empty()
+            && self.state.export_aspect.ratio().is_none()
     }
 
     /// The export of the current edits into `output`, at the project's
@@ -560,27 +820,7 @@ impl StudioModel {
                 height = target;
             }
         }
-        let layout = {
-            let mut state = self.state.clone();
-            // The layout is rebuilt for the output canvas; style fractions scale with it.
-            state.style = self.state.style.clone();
-            let document = &self.base_document;
-            let source = (f64::from(self.source_size.0), f64::from(self.source_size.1));
-            let preset = document.export_aspect_preset();
-            let reframed = preset.ratio().is_some();
-            let fit = reframed
-                && document.export_aspect_content_mode()
-                    == bettershot_core::recording::edit::ExportAspectContentMode::Fit;
-            let aspect = (reframed && source.1 > 0.0).then_some(source.0 / source.1);
-            let _ = &mut state;
-            StudioLayout::make(
-                (width, height),
-                &self.state.style,
-                self.has_camera,
-                aspect,
-                if fit { ContentMode::Fit } else { ContentMode::Fill },
-            )
-        };
+        let layout = Self::make_layout(&self.state, self.source_size, self.has_camera, (width, height));
         ExportRequest {
             screen: self.session.screen_path(),
             camera: self.has_camera.then(|| self.session.camera_path()),
@@ -593,6 +833,12 @@ impl StudioModel {
             masks: self.state.masks.clone(),
             pointer: self.pointer_synthesized.then(|| self.pointer.clone()),
             shows_press_effects: self.state.shows_click_effects,
+            motion_blur_samples: settings.speed.motion_blur_samples(),
+            shots_3d: self.state.shots_3d.clone(),
+            keystrokes: Overlays { keystrokes: &self.keystrokes, subtitles: &self.subtitles, karaoke: &self.karaoke }
+                .keystrokes_for(&self.state),
+            subtitles: Overlays { keystrokes: &self.keystrokes, subtitles: &self.subtitles, karaoke: &self.karaoke }
+                .subtitles_for(&self.state),
             canvas: (width as u32, height as u32),
             frames_per_second: settings.effective_frame_rate().frames_per_second(),
             crf: settings.quality.crf(),
@@ -610,6 +856,32 @@ impl StudioModel {
         prefs: &mut bettershot_core::prefs::Preferences,
     ) -> std::io::Result<String> {
         deliverable::file_name(&self.session, extension, prefs, chrono::Local::now().naive_local())
+    }
+}
+
+/// The session's caption sources, handed to the compositor as the state
+/// shows or hides them.
+#[derive(Clone, Copy)]
+struct Overlays<'a> {
+    keystrokes: &'a KeystrokeCaptionTimeline,
+    subtitles: &'a SubtitleTimeline,
+    karaoke: &'a KaraokeTimeline,
+}
+
+impl Overlays<'_> {
+    fn keystrokes_for(&self, state: &Snapshot) -> Option<(KeystrokeCaptionTimeline, KeystrokePlacement)> {
+        (state.shows_keystrokes && !self.keystrokes.is_empty())
+            .then(|| (self.keystrokes.clone(), state.keystroke_placement))
+    }
+
+    fn subtitles_for(&self, state: &Snapshot) -> Option<(SubtitleTimeline, SubtitleBarStyle, Option<KaraokeTimeline>)> {
+        (state.shows_subtitles && !self.subtitles.is_empty()).then(|| {
+            (
+                self.subtitles.clone(),
+                state.subtitle_style.clone(),
+                (!self.karaoke.is_empty()).then(|| self.karaoke.clone()),
+            )
+        })
     }
 }
 

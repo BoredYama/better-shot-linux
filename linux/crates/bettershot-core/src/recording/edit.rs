@@ -657,6 +657,20 @@ pub enum KeystrokePlacement {
 }
 
 impl KeystrokePlacement {
+    pub const ALL: [Self; 6] =
+        [Self::TopLeft, Self::TopCenter, Self::TopRight, Self::BottomLeft, Self::BottomCenter, Self::BottomRight];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::TopLeft => "Top left",
+            Self::TopCenter => "Top center",
+            Self::TopRight => "Top right",
+            Self::BottomLeft => "Bottom left",
+            Self::BottomCenter => "Bottom center",
+            Self::BottomRight => "Bottom right",
+        }
+    }
+
     pub fn is_top(self) -> bool {
         matches!(self, Self::TopLeft | Self::TopCenter | Self::TopRight)
     }

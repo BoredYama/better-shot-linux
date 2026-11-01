@@ -21,6 +21,7 @@ mod services;
 mod settings;
 mod sharing;
 mod studio;
+mod teleprompter;
 mod transfer_card;
 
 use adw::prelude::*;

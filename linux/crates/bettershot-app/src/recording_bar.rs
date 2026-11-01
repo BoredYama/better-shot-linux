@@ -30,6 +30,7 @@ struct Bar {
     camera: gtk::ToggleButton,
     microphone: gtk::ToggleButton,
     audio: gtk::ToggleButton,
+    script: gtk::ToggleButton,
 }
 
 thread_local! {
@@ -87,17 +88,27 @@ pub fn refresh() {
             "Stop and save recording, {elapsed} elapsed"
         ))]);
         let app = App::get();
-        let (camera, microphone, audio) = app.with_prefs(|p| {
+        let (camera, microphone, audio, script) = app.with_prefs(|p| {
             (
                 p.recording_camera_device_id().is_some(),
                 p.recording_microphone_device_id().is_some(),
                 p.recording_system_audio(),
+                p.teleprompter_enabled(),
             )
         });
         for (button, on, label) in [
             (&bar.camera, camera, if camera { "Camera on" } else { "Camera off" }),
             (&bar.microphone, microphone, if microphone { "Microphone on" } else { "Microphone off" }),
             (&bar.audio, audio, if audio { "System audio on" } else { "System audio off" }),
+            (
+                &bar.script,
+                script,
+                if script {
+                    "Teleprompter on: click to edit the script"
+                } else {
+                    "Teleprompter off: click to write a script"
+                },
+            ),
         ] {
             if button.is_active() != on {
                 button.set_active(on);
@@ -233,9 +244,18 @@ fn build(app: &App) -> Bar {
             app.set_pref(keys::RECORDING_SYSTEM_AUDIO, button.is_active());
         }
     });
+    // The teleprompter: the toggle shows whether it is on; a click opens
+    // the script window (port of the bar's Script item).
+    let (script, _) = toggle("accessories-text-editor-symbolic", "accessories-text-editor-symbolic", "Script");
+    script.connect_clicked(|button| {
+        let app = App::get();
+        button.set_active(app.with_prefs(|p| p.teleprompter_enabled()));
+        crate::teleprompter::toggle_composer(&app);
+    });
     picker.append(&camera);
     picker.append(&microphone);
     picker.append(&audio);
+    picker.append(&script);
 
     // The countdown menu, shared by screenshots and recordings.
     let timer_menu = gio::Menu::new();
@@ -379,5 +399,6 @@ fn build(app: &App) -> Bar {
         camera,
         microphone,
         audio,
+        script,
     }
 }

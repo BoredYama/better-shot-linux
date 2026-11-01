@@ -11,6 +11,7 @@ pub mod r2_client;
 pub mod recorder;
 pub mod screenshot;
 pub mod secrets;
+pub mod transcription;
 pub mod tray;
 pub mod video;
 

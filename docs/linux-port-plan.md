@@ -1,9 +1,11 @@
 # BetterShot for Linux: port plan
 
-Status: Phases 0–6 complete (core, CI, screenshot app, image editor, capture
-extras, sharing and library, screen recording, video editor) and the studio
-follow-ups are complete, and Phase 7 (packaging, the teleprompter, whisper
-subtitles, 3D shots) is delivered.
+Status: Phases 0–7 are delivered (core, CI, screenshot app, image editor,
+capture extras, sharing and library, screen recording, video editor, the
+studio follow-ups, packaging, the teleprompter, whisper subtitles, 3D shots),
+plus the optional BetterShot Helper GNOME Shell extension. Since then the
+work has been driven by feedback from a real Ubuntu 26.04 GNOME 50 desktop
+with two monitors; see "Real-desktop feedback" below.
 
 ## What is being ported
 
@@ -422,7 +424,7 @@ building it:
 - Not yet: transcription (Phase 7's optional whisper.cpp), a subtitle
   editor, and 3D shots (Phase 7).
 
-### Phase 7: Advanced and distribution (in progress)
+### Phase 7: Advanced and distribution (delivered)
 - 3D shots, verified against `Cap3DReference.json`/`Cap3DScenes.json`.
   The adapted Cap code keeps its AGPLv3 attribution. (Done, on the CPU
   rather than `wgpu`; see below.)
@@ -477,14 +479,40 @@ Delivered so far:
   the prompter scrolls by wheel, keys, or buttons instead of following the
   voice; the matcher is ready for a recognizer.
 
+## Real-desktop feedback
+
+The first tester ran the `.deb` on Ubuntu 26.04 (GNOME 50, Wayland only: the
+Xorg session is gone from GNOME there) with two monitors. What it changed:
+
+- GNOME's Screenshot portal flashes the screen for every non-interactive shot
+  and keeps a one-time Allow answer; a stored Deny (closing the question
+  counts) makes every later non-interactive capture fail silently. BetterShot
+  now detects the stored Deny and offers Ask Again, which resets that answer.
+- The optional ScreenCast path for silent still frames needs a screen
+  selection and covers only the shared monitors, so it is opt-in and checks
+  coverage; the BetterShot Helper extension is the silent path on GNOME.
+- Mutter cancels clipboard writes from unfocused clients, so copies wait for
+  a focused BetterShot window (the Copied window, `clipboard::when_focused`).
+- GNOME's tray needs the AppIndicator extension; the tray now ships its icon
+  as pixmaps and waits for a late host. The GlobalShortcuts portal describes
+  triggers as `Press <shift><super>4`, which BetterShot parses into
+  `Super+Shift+4`.
+- Tray captures wait for the menu to close, capture cards stay until
+  dismissed at 1.5 times the old Large size (the deck keeps five and
+  scrolls), and Capture Screen picks one monitor when there are several.
+
 ## Verification
 
 - Headless: `cargo test` for core logic and renderer pixel tests (PNG golden
   images, as the Swift export checks do).
-- GUI: offscreen GTK snapshots in light and dark appearances where practical.
-- Manual: capture, portals, shortcuts, tray, and recording need a real Wayland
-  session. This cloud environment has no display server or portals, so those
-  paths have to be checked on a real desktop and reported as unverified until then.
+- GUI: `make -C linux check-ui` drives the real app under Xvfb in light and
+  dark with a fixture screen.
+- GNOME: `make -C linux check-gnome-helper` runs a real headless GNOME Shell
+  (46 here) with the helper extension, once with one virtual monitor and once
+  with two, and drives real app captures through it.
+- Manual: real portals, PipeWire, audio, cameras, the tray, Wayland
+  placement, and GNOME versions other than 46 need a real desktop; report
+  them as unverified until a tester confirms them.
 
 ## Rough size
 

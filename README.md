@@ -23,11 +23,12 @@ in the Media Gallery; record a display, window, or area with audio, a camera,
 and a teleprompter; and cut, frame, zoom, mask, restyle the cursor, caption,
 reframe, fly a 3D camera around, and export recordings in the studio.
 
-Everything so far was verified headless (`make check` and `make check-ui`
-under Xvfb with a fixture screen). Real portals, PipeWire, PulseAudio,
-cameras, the tray, Wayland window placement, and audio output have not been
-exercised on a desktop yet, so reports from real machines are the most
-useful thing you can contribute: see [Reporting what you find](#reporting-what-you-find).
+Development is verified headless (`make check`, `make check-ui` under Xvfb
+with a fixture screen, and `make check-gnome-helper` in a headless GNOME
+Shell), and by a tester on Ubuntu 26.04 with GNOME 50 and two monitors, whose
+reports shaped the GNOME behavior described here. PipeWire recording,
+PulseAudio, cameras, KDE and wlroots desktops, and audio output still need
+reports from real machines: see [Reporting what you find](#reporting-what-you-find).
 
 [Build from source](#build-from-source) · [Install](#install) · [GNOME Shell helper](#gnome-shell-helper) ·
 [Packages](#packages) · [Verify](#verify-a-build) · [Using it](#using-it) ·
